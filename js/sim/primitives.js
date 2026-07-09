@@ -159,15 +159,24 @@ export class Draw {
 
     const cx = x + w / 2;
     const trunc = (s, max = 18) => (s.length > max ? s.slice(0, max - 1) + "…" : s);
+    const accent = 8;
     if (title && value && sub) {
-      this.text(cx, y + 18, trunc(title, 14), { size: 12, weight: 700, align: "center", color: state === "dim" ? C.muted : C.ink });
-      this.text(cx, y + h / 2 + 2, trunc(value, 18), { size: 11, align: "center", mono: true, color: borderCol, weight: 600 });
-      this.text(cx, y + h - 12, trunc(sub, 16), { size: 10, align: "center", color: C.muted });
+      const titleY = y + accent + 12;
+      const valueY = y + h * 0.52;
+      const subY = y + h - 12;
+      this.text(cx, titleY, trunc(title, 14), { size: h < 56 ? 11 : 12, weight: 700, align: "center", color: state === "dim" ? C.muted : C.ink });
+      this.text(cx, valueY, trunc(value, 18), { size: h < 56 ? 10 : 11, align: "center", mono: true, color: borderCol, weight: 600 });
+      this.text(cx, subY, trunc(sub, 16), { size: 10, align: "center", color: C.muted });
     } else if (title && value) {
-      this.text(cx, y + 20, trunc(title, 14), { size: 13, weight: 700, align: "center", color: state === "dim" ? C.muted : C.ink });
-      this.text(cx, y + h - 16, trunc(value, 20), { size: value.length > 14 ? 11 : 13, align: "center", mono: true, color: borderCol, weight: 600 });
+      const compact = h < 56;
+      const titleY = y + accent + (compact ? 10 : 14);
+      const valueY = y + h - (compact ? 12 : 16);
+      const titleSize = compact ? 11 : 13;
+      const valueSize = compact || value.length > 14 ? 11 : 13;
+      this.text(cx, titleY, trunc(title, compact ? 12 : 14), { size: titleSize, weight: 700, align: "center", color: state === "dim" ? C.muted : C.ink });
+      this.text(cx, valueY, trunc(value, compact ? 14 : 20), { size: valueSize, align: "center", mono: true, color: borderCol, weight: 600 });
     } else if (title) {
-      this.text(cx, y + h / 2, trunc(title, 16), { size: 14, weight: 700, align: "center", color: state === "dim" ? C.muted : C.ink });
+      this.text(cx, y + h / 2, trunc(title, 16), { size: h < 44 ? 12 : 14, weight: 700, align: "center", color: state === "dim" ? C.muted : C.ink });
     } else if (sub) {
       this.text(cx, y + h - 14, trunc(sub, 16), { size: 11, align: "center", color: C.muted });
     }
@@ -203,10 +212,10 @@ export class Draw {
     c.beginPath(); c.ellipse(x + w / 2, y + ry, w / 2, ry, 0, 0, Math.PI * 2);
     c.fillStyle = withAlpha(col, 0.18); c.fill(); c.stroke();
     c.restore();
-    this.text(x + w / 2, y + ry + 14, title.length > 14 ? title.slice(0, 13) + "…" : title, { size: 12, weight: 700, align: "center" });
+    this.text(x + w / 2, y + ry + 16, title.length > 14 ? title.slice(0, 13) + "…" : title, { size: h < 64 ? 11 : 12, weight: 700, align: "center" });
     if (value) {
       const vs = value.length > 16 ? value.slice(0, 15) + "…" : value;
-      this.text(x + w / 2, y + h - ry - 10, vs, { size: value.length > 12 ? 11 : 13, align: "center", mono: true, color: col, weight: 600 });
+      this.text(x + w / 2, y + h - ry - 12, vs, { size: value.length > 12 ? 11 : 12, align: "center", mono: true, color: col, weight: 600 });
     }
     this._noteLayout("db", x, y, w, h, title);
     return { cx: x + w / 2, cy: y + h / 2, x, y, w, h, top: y, bottom: y + h, left: x, right: x + w };

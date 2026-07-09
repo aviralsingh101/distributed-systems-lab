@@ -35,7 +35,30 @@ export const content = {
 </ul>
 <p>Interview tip: whiteboard the charge flow, mark where <b>Dogpile Effect</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
   ],
-  related: [],
+  figures: [
+    { id: "dogpile-workers", svg: `<svg viewBox="0 0 520 140" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Dogpile effect parallel recompute">
+  <defs><marker id="fig-dogpile-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
+  <rect x="180" y="44" width="88" height="40" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
+  <text x="224" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Cache</text>
+  <text x="224" y="76" text-anchor="middle" fill="#ff5c6c" font-size="9" font-family="system-ui">MISS</text>
+  <rect x="350" y="44" width="96" height="40" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
+  <text x="398" y="68" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Recompute</text>
+  <rect x="30" y="20" width="56" height="30" rx="5" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
+  <text x="58" y="40" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">W1</text>
+  <rect x="30" y="58" width="56" height="30" rx="5" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
+  <text x="58" y="78" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">W2</text>
+  <rect x="30" y="96" width="56" height="30" rx="5" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
+  <text x="58" y="116" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">W3</text>
+  <line x1="86" y1="35" x2="178" y2="58" stroke="#5b9dff" stroke-width="1.2" marker-end="url(#fig-dogpile-arr)"/>
+  <line x1="86" y1="73" x2="178" y2="64" stroke="#5b9dff" stroke-width="1.2" marker-end="url(#fig-dogpile-arr)"/>
+  <line x1="86" y1="111" x2="178" y2="70" stroke="#5b9dff" stroke-width="1.2" marker-end="url(#fig-dogpile-arr)"/>
+  <line x1="268" y1="64" x2="348" y2="64" stroke="#ff5c6c" stroke-width="1.5" marker-end="url(#fig-dogpile-arr)"/>
+  <line x1="268" y1="64" x2="348" y2="64" stroke="#ff5c6c" stroke-width="1.5" marker-end="url(#fig-dogpile-arr)"/>
+  <line x1="268" y1="64" x2="348" y2="64" stroke="#ff5c6c" stroke-width="1.5" marker-end="url(#fig-dogpile-arr)"/>
+  <text x="260" y="128" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">All workers recompute — use single-flight lock</text>
+</svg>`, caption: `Dogpile: every worker sees the same cache miss and hits origin in parallel.` },
+  ],
+  related: ["cache-stampede", "thundering-herd", "request-coalescing"],
 };
 
 export function createSimulation(stage, panel, stageEl) {

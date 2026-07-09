@@ -60,6 +60,8 @@ export function metricsLab(stage, panel, stageEl, cfg) {
     fanoutHint: cfg.fanoutHint || "Many clients → shared resource",
     fanoutNodePrefix: cfg.fanoutNodePrefix || "C",
     queueStatusNote: cfg.queueStatusNote,
+    originTitle: cfg.originTitle || "Backend",
+    cacheTitle: cfg.cacheTitle || "Cache",
   };
 
   return mountLab(stage, panel, stageEl, {
@@ -88,6 +90,13 @@ export function metricsLab(stage, panel, stageEl, cfg) {
       ctx.state.amplificationKind = amplificationKind;
       ctx.state.metricsDrawMode = drawMode;
       ctx.state.hedgeFanout = 1;
+      ctx.state.fanoutClients = cfg.fanoutClients ?? 5;
+      ctx.state.fanoutRetries = cfg.fanoutRetries ?? 1;
+      ctx.state.fanoutKind = cfg.fanoutKind ?? "generic";
+      ctx.state.chainDepth = cfg.chainDepth ?? 2;
+      ctx.state.originTitle = labels.originTitle;
+      ctx.state.cacheTitle = labels.cacheTitle;
+      ctx.state.lastFanoutLoad = 0;
       if (mode === "timeline") initTimelineState(ctx, timelineVariant);
       if (cfg.init) cfg.init(ctx);
     },
@@ -220,10 +229,47 @@ function handleSend(ctx, mode, capKey, timelineVariant = "generic") {
       }
       break;
     case "fanout":
-      processTokenRequest(ctx, capKey);
+      processFanoutRequest(ctx, capKey);
       break;
     default:
       processTokenRequest(ctx, capKey);
+  }
+}
+
+function fanoutLoad(ctx) {
+  const clients = ctx.state.fanoutClients || 5;
+  const retries = ctx.state.fanoutRetries || 1;
+  switch (ctx.state.fanoutKind) {
+    case "retry":
+      return clients * retries;
+    case "cache-miss":
+      return clients;
+    case "chain":
+      return clients * retries * (ctx.state.chainDepth || 2);
+    default:
+      return 1;
+  }
+}
+
+function processFanoutRequest(ctx, capKey) {
+  const load = fanoutLoad(ctx);
+  ctx.state.lastFanoutLoad = load;
+  let served = 0;
+  let dropped = 0;
+  for (let i = 0; i < load; i++) {
+    if (ctx.state.tokens >= 1) {
+      ctx.state.tokens -= 1;
+      served++;
+    } else {
+      dropped++;
+    }
+  }
+  ctx.state.accepted += served;
+  ctx.state.pendingA += served;
+  if (dropped) {
+    ctx.state.dropped += dropped;
+    ctx.state.pendingD += dropped;
+    flashDrop(ctx);
   }
 }
 
@@ -367,6 +413,271 @@ function tickPhysics(ctx, mode, capKey, refillKey, burstRate, dt, t, windowSec, 
     ctx.state.seriesDropped.push({ t, v: ctx.state.pendingD });
     ctx.state.pendingA = 0;
     ctx.state.pendingD = 0;
+  }
+}
+
+function drawBackendCapacity(d, slot, tokens, cap, rate, label, recoveryLabel) {
+  const frac = clamp(tokens / Math.max(1, cap));
+  const overloaded = tokens < cap * 0.15;
+  d.text(slot.x + slot.w / 2, slot.y - 8, label, { size: 11, align: "center", color: C.muted, weight: 600 });
+  d.node(slot.x + 8, slot.y + 12, slot.w - 16, 58, {
+    title: "Headroom",
+    color: overloaded ? C.err : frac < 0.35 ? C.warn : C.ok,
+    value: `${tokens.toFixed(0)}/${cap}`,
+    active: !overloaded,
+  });
+  d.gauge(slot.x + 8, slot.y + 78, slot.w - 16, 14, frac, {
+    color: overloaded ? C.err : C.accent,
+    label: "capacity",
+    value: `${Math.round(frac * 100)}%`,
+  });
+  d.text(slot.x + slot.w / 2, slot.y + slot.h - 6, `${recoveryLabel} ${rate}/s`, { size: 10, align: "center", color: C.muted });
+}
+
+/** Shared sizing for fanout / retry pipeline diagrams (centered on stage). */
+const PIPE = {
+  clientW: 68,
+  clientH: 50,
+  clientGap: 20,
+  serviceW: 136,
+  serviceH: 64,
+  cacheW: 128,
+  cacheH: 58,
+  dbW: 128,
+  dbH: 76,
+  rowGap: 44,
+  badgeGap: 16,
+  stageCx: 500,
+};
+
+function diagramZone(L) {
+  const x = L.chart.x + 8;
+  const y = L.chart.y + 6;
+  const w = L.chart.w - 16;
+  return { x, y, w, h: 214, cx: x + w / 2 };
+}
+
+function pipelineChartRect(L) {
+  const zone = diagramZone(L);
+  const chartY = zone.y + zone.h + 24;
+  const chartH = L.chart.y + L.chart.h - chartY;
+  return { x: L.chart.x, y: chartY, w: L.chart.w, h: chartH };
+}
+
+function isPipelineDiagram(visual, ctx) {
+  return visual === "retry-fanout" || visual === "cache-stampede" || visual === "retry-chain" || visual === "coord-omission"
+    || (visual === "fanout" && ctx.state.fanoutKind);
+}
+
+function layoutClientRow(d, count, y, prefix, color = C.client, cx = PIPE.stageCx) {
+  const { clientW: w, clientH: h, clientGap: gap } = PIPE;
+  const totalW = count * w + Math.max(0, count - 1) * gap;
+  const x0 = cx - totalW / 2;
+  const nodes = [];
+  for (let i = 0; i < count; i++) {
+    const x = x0 + i * (w + gap);
+    nodes.push(d.node(x, y, w, h, { title: `${prefix}${i + 1}`, color }));
+  }
+  return { x0, totalW, w, h, nodes, rowBottom: y + h, cx: x0 + totalW / 2 };
+}
+
+function drawGenericFanout(d, L, ctx, labels, cap, rate) {
+  const slot = L.bucket;
+  const clients = ctx.state.fanoutClients || 5;
+  drawBackendCapacity(d, slot, ctx.state.tokens, cap, rate, labels.bucketLabel, "recovery");
+  const zone = diagramZone(L);
+  d.text(zone.x + 4, zone.y + 12, labels.fanoutHint, { size: 11, color: C.muted });
+  const { serviceW: sw, serviceH: sh, rowGap } = PIPE;
+  const target = d.node(zone.cx - sw / 2, zone.y + 30, sw, sh, {
+    title: ctx.state.originTitle || "Shared resource",
+    color: ctx.state.tokens < 1 ? C.err : C.service,
+    value: ctx.state.tokens < 1 ? "OVERLOAD" : "active",
+  });
+  const clientRow = layoutClientRow(d, clients, zone.y + 30 + sh + rowGap, labels.fanoutNodePrefix, C.client, zone.cx);
+  clientRow.nodes.forEach((n) => {
+    d.arrow(n.cx, n.y, target.cx, target.bottom, {
+      color: ctx.toggles.burst ? C.warn : C.faint,
+      alpha: ctx.toggles.burst ? 0.65 : 0.4,
+      head: true,
+    });
+  });
+}
+
+function drawRetryFanout(d, L, ctx, labels, cap, rate) {
+  const slot = L.bucket;
+  const clients = ctx.state.fanoutClients || 5;
+  const retries = ctx.state.fanoutRetries || 3;
+  const load = ctx.state.lastFanoutLoad || clients * retries;
+  drawBackendCapacity(d, slot, ctx.state.tokens, cap, rate, labels.bucketLabel, "recovery");
+  const zone = diagramZone(L);
+  d.text(zone.x + 4, zone.y + 12, labels.fanoutHint, { size: 11, color: C.muted });
+  const { serviceW: sw, serviceH: sh, rowGap, badgeGap } = PIPE;
+  const backend = d.node(zone.cx - sw / 2, zone.y + 30, sw, sh, {
+    title: ctx.state.originTitle || "Backend",
+    color: ctx.state.tokens < 1 ? C.err : C.service,
+    value: ctx.state.tokens < 1 ? "OVERLOAD" : "serving",
+    active: ctx.state.tokens > 0,
+  });
+  const clientRow = layoutClientRow(d, clients, zone.y + 30 + sh + rowGap, labels.fanoutNodePrefix, C.client, zone.cx);
+  clientRow.nodes.forEach((n, i) => {
+    for (let r = 0; r < retries; r++) {
+      const color = ctx.toggles.burst ? C.err : C.warn;
+      const alpha = 0.35 + r * 0.18;
+      d.arrow(n.cx, n.y, backend.left + 24 + r * 10, backend.bottom, {
+        color,
+        alpha,
+        head: r === retries - 1,
+        width: 1.2,
+        dashed: r > 0,
+        label: r === 0 && i === 0 ? "retry" : "",
+      });
+    }
+  });
+  d.badge(zone.cx, clientRow.rowBottom + badgeGap, `${clients} clients × ${retries} retries = ${clients * retries} req/wave`, {
+    color: load > cap ? C.err : C.warn,
+    align: "center",
+  });
+}
+
+function drawCacheStampede(d, L, ctx, labels, cap, rate) {
+  const slot = L.bucket;
+  const clients = ctx.state.fanoutClients || 5;
+  drawBackendCapacity(d, slot, ctx.state.tokens, cap, rate, labels.bucketLabel, "origin drain");
+  const zone = diagramZone(L);
+  d.text(zone.x + 4, zone.y + 12, labels.fanoutHint, { size: 11, color: C.muted });
+  const { cacheW, cacheH, dbW, dbH, rowGap, badgeGap } = PIPE;
+  const laneY = zone.y + 36;
+  const midGap = 48;
+  const pairW = cacheW + midGap + dbW;
+  const cache = d.node(zone.cx - pairW / 2, laneY, cacheW, cacheH, {
+    title: ctx.state.cacheTitle || "Cache",
+    color: C.queue,
+    value: ctx.toggles.burst ? "MISS" : "HIT?",
+    active: ctx.toggles.burst,
+  });
+  const origin = d.db(zone.cx - pairW / 2 + cacheW + midGap, laneY - 4, dbW, dbH, {
+    title: ctx.state.originTitle || "Origin / DB",
+    color: ctx.state.tokens < 1 ? C.err : C.ledger,
+    value: ctx.state.tokens < 1 ? "SATURATED" : "fetching",
+  });
+  d.arrow(cache.right, cache.cy, origin.left, origin.cy, {
+    color: ctx.toggles.burst ? C.err : C.faint,
+    alpha: ctx.toggles.burst ? 0.7 : 0.35,
+    head: true,
+    label: ctx.toggles.burst ? "N× fetch" : "",
+  });
+  const clientRow = layoutClientRow(d, clients, laneY + Math.max(cacheH, dbH) + 36, labels.fanoutNodePrefix, C.client, zone.cx);
+  clientRow.nodes.forEach((n, i) => {
+    d.arrow(n.cx, n.y, cache.cx, cache.bottom, { color: C.faint, alpha: 0.45, head: true, width: 1.2 });
+    if (ctx.toggles.burst || ctx.state.lastFanoutLoad > 0) {
+      d.arrow(cache.right, cache.bottom - 8, origin.left + 16 + i * 12, origin.bottom - 6, {
+        color: i === 0 ? C.err : C.warn,
+        alpha: 0.35 + (i === 0 ? 0.3 : 0.08),
+        head: i === 0,
+        width: 1.2,
+        dashed: true,
+        label: i === 0 ? "miss" : "",
+      });
+    }
+  });
+  d.badge(zone.cx, clientRow.rowBottom + badgeGap, ctx.toggles.burst
+    ? `${clients} parallel origin fetches — no single-flight`
+    : "Send or burst → cache miss stampede",
+    { color: ctx.toggles.burst ? C.err : C.muted, align: "center" });
+}
+
+function drawRetryChain(d, L, ctx, labels, cap, rate) {
+  const slot = L.bucket;
+  const clients = ctx.state.fanoutClients || 4;
+  const retries = ctx.state.fanoutRetries || 2;
+  const depth = ctx.state.chainDepth || 2;
+  const load = clients * retries * depth;
+  drawBackendCapacity(d, slot, ctx.state.tokens, cap, rate, labels.bucketLabel, "recovery");
+  const zone = diagramZone(L);
+  d.text(zone.x + 4, zone.y + 12, labels.fanoutHint, { size: 11, color: C.muted });
+  const hopW = 108;
+  const hopH = 60;
+  const gap = 36;
+  const chainW = (depth + 1) * hopW + depth * gap;
+  const startX = zone.cx - chainW / 2;
+  const chainY = zone.y + 32;
+  const hops = ["Gateway", "Order Svc", "Ledger DB"].slice(0, depth + 1);
+  const hopNodes = [];
+  hops.forEach((title, i) => {
+    const x = startX + i * (hopW + gap);
+    const isLeaf = i === depth;
+    const node = isLeaf
+      ? d.db(x, chainY, hopW, hopH + 10, {
+          title,
+          color: ctx.state.tokens < 1 ? C.err : C.ledger,
+          value: ctx.state.tokens < 1 ? "hot" : "",
+        })
+      : d.node(x, chainY, hopW, hopH, { title, color: C.service });
+    hopNodes.push(node);
+    if (i > 0) {
+      d.arrow(hopNodes[i - 1].right, chainY + hopH / 2, x, chainY + hopH / 2, { color: C.accent, head: true, alpha: 0.65, label: "retry" });
+    }
+  });
+  const clientRow = layoutClientRow(d, Math.min(clients, 5), chainY + hopH + 10 + PIPE.rowGap, "C", C.client, zone.cx);
+  clientRow.nodes.forEach((n) => {
+    d.arrow(n.cx, n.y, hopNodes[0].cx, hopNodes[0].bottom, { color: C.faint, alpha: 0.5, head: true });
+  });
+  if (clients > 5) {
+    d.text(clientRow.x0 + clientRow.totalW + 12, chainY + hopH + 10 + PIPE.rowGap + PIPE.clientH / 2, `+${clients - 5}`, { size: 11, color: C.muted });
+  }
+  d.badge(zone.cx, clientRow.rowBottom + PIPE.badgeGap, `${clients}×${retries} retries × ${depth} hops ≈ ${load} load`, {
+    color: load > cap ? C.err : C.warn,
+    align: "center",
+  });
+}
+
+function drawCoordOmission(d, L, ctx, labels, cap) {
+  const slot = L.bucket;
+  const slo = cap;
+  const p99 = ctx.state.latencyP99;
+  const breach = p99 > slo;
+  const omitting = ctx.toggles.burst && breach;
+  d.text(slot.x + slot.w / 2, slot.y - 8, "Benchmark load generator", { size: 11, align: "center", color: C.muted, weight: 600 });
+  d.node(slot.x + 8, slot.y + 14, slot.w / 2 - 12, 68, {
+    title: "Reported p99",
+    value: omitting ? `${slo} ms` : `${Math.round(p99)} ms`,
+    color: omitting ? C.ok : breach ? C.err : C.accent,
+  });
+  d.node(slot.x + slot.w / 2 + 4, slot.y + 14, slot.w / 2 - 12, 68, {
+    title: "True p99",
+    value: `${Math.round(p99)} ms`,
+    color: breach ? C.err : C.ok,
+  });
+  d.gauge(slot.x + 8, slot.y + 90, slot.w - 16, 14, clamp(p99 / (slo * 2)), {
+    color: breach ? C.err : C.accent,
+    label: "actual tail",
+    value: `${Math.round(p99)}ms`,
+  });
+  const zone = diagramZone(L);
+  const genW = 108;
+  const genH = 56;
+  const flowY = zone.y + 56;
+  const genX = zone.cx - 180;
+  const backendX = zone.cx + 72;
+  const gen = d.node(genX, flowY, genW, genH, {
+    title: "Load gen",
+    color: omitting ? C.warn : C.client,
+    value: omitting ? "waiting" : "sending",
+    active: !omitting,
+  });
+  const backend = d.node(backendX, flowY, 112, genH, {
+    title: "Backend",
+    color: breach ? C.err : C.service,
+    value: breach ? "stalled" : "fast",
+  });
+  if (omitting) {
+    d.arrow(gen.right, gen.cy, backend.left, backend.cy, { color: C.faint, alpha: 0.3, dashed: true, label: "blocked" });
+    d.badge(zone.cx, flowY + genH + 20, "Generator waits — stall omitted from benchmark", { color: C.err, align: "center", filled: true });
+    d.text(zone.cx, flowY + genH + 52, "coordinated omission hides tail latency", { size: 10, align: "center", color: C.err });
+  } else {
+    d.arrow(gen.right, gen.cy, backend.left, backend.cy, { color: C.accent, head: true, label: "req" });
+    d.arrow(backend.right, backend.cy, zone.x + zone.w - 24, backend.cy, { color: C.ok, head: true, label: "ok" });
+    d.text(zone.cx, flowY + genH + 36, "open-loop load exposes true stalls", { size: 10, align: "center", color: C.muted });
   }
 }
 
@@ -614,20 +925,30 @@ function drawFrame(ctx, mode, L, labels, capKey, refillKey, windowSec, drawMode,
       }
       break;
     }
+    case "retry-fanout":
+      drawRetryFanout(d, L, ctx, labels, cap, rate);
+      break;
+    case "cache-stampede":
+      drawCacheStampede(d, L, ctx, labels, cap, rate);
+      break;
+    case "retry-chain":
+      drawRetryChain(d, L, ctx, labels, cap, rate);
+      break;
+    case "coord-omission":
+      drawCoordOmission(d, L, ctx, labels, cap);
+      break;
     case "fanout": {
-      d.tokenBucket(L.bucket.x, L.bucket.y, L.bucket.w, L.bucket.h, ctx.state.tokens, cap, { label: labels.bucketLabel, refillRate: rate });
-      d.text(L.chart.x, L.bucket.y + 20, labels.fanoutHint, { size: 11, color: C.muted });
-      for (let i = 0; i < 5; i++) {
-        d.node(60 + i * 70, L.bucket.y + L.bucket.h + 30, 50, 32, { title: `${labels.fanoutNodePrefix}${i + 1}`, color: C.client });
-        d.arrow(85 + i * 70, L.bucket.y + L.bucket.h + 28, L.bucket.x + 20, L.bucket.y + L.bucket.h, { color: C.faint, alpha: 0.5, head: true });
-      }
+      if (ctx.state.fanoutKind === "cache-miss") drawCacheStampede(d, L, ctx, labels, cap, rate);
+      else if (ctx.state.fanoutKind === "retry") drawRetryFanout(d, L, ctx, labels, cap, rate);
+      else drawGenericFanout(d, L, ctx, labels, cap, rate);
       break;
     }
     default:
       d.tokenBucket(L.bucket.x, L.bucket.y, L.bucket.w, L.bucket.h, ctx.state.tokens, cap, { label: labels.bucketLabel, refillRate: rate });
   }
 
-  d.timeSeriesChart(L.chart.x, L.chart.y, L.chart.w, L.chart.h, [
+  const chartRect = isPipelineDiagram(visual, ctx) ? pipelineChartRect(L) : L.chart;
+  d.timeSeriesChart(chartRect.x, chartRect.y, chartRect.w, chartRect.h, [
     { label: labels.acceptedSeriesLabel, color: C.accent, points: ctx.state.seriesAccepted },
     { label: labels.droppedSeriesLabel, color: C.err, points: ctx.state.seriesDropped },
   ], { windowSec, title: labels.chartTitle });
@@ -635,7 +956,7 @@ function drawFrame(ctx, mode, L, labels, capKey, refillKey, windowSec, drawMode,
   d.counterTile(L.dropped.x, L.dropped.y, L.dropped.w, L.dropped.h, labels.droppedLabel, ctx.state.dropped, C.err);
 
   if (ctx.state.alert) {
-    d.badge(L.chart.x + L.chart.w / 2, L.chart.y - 12, ctx.state.alert, { color: C.err, filled: true, align: "center" });
+    d.badge(chartRect.x + chartRect.w / 2, chartRect.y - 12, ctx.state.alert, { color: C.err, filled: true, align: "center" });
   }
 }
 
@@ -696,6 +1017,17 @@ function drawGcTimeline(d, L, ctx, labels, cap) {
 }
 
 function statusFor(ctx, mode, labels, drawMode) {
+  if (drawMode === "coord-omission") {
+    const slo = ctx.params.cap;
+    const p99 = Math.round(ctx.state.latencyP99);
+    if (ctx.toggles.burst && p99 > slo) {
+      return { text: `True p99 ${p99}ms hidden — benchmark reports ${slo}ms`, cls: "err" };
+    }
+    return { text: `True p99 ${p99}ms vs SLO ${slo}ms`, cls: p99 > slo ? "err" : "ok" };
+  }
+  if (drawMode === "retry-fanout" || drawMode === "retry-chain" || drawMode === "cache-stampede") {
+    if (ctx.toggles.burst) return { text: "Burst ON — parallel load overwhelming shared backend", cls: "warn" };
+  }
   if (ctx.toggles.burst && drawMode !== "hedged" && drawMode !== "shuffle-shard") {
     if (drawMode === "admission") return { text: "Burst ON — admission gate under overload", cls: "warn" };
     if (mode === "leaky") return { text: `Burst ON — queue filling (${ctx.state.queueLevel.toFixed(0)}/${ctx.params.cap})`, cls: "warn" };
@@ -785,7 +1117,15 @@ function statusFor(ctx, mode, labels, drawMode) {
       }
       return { text: `${(ctx.state.timelineEvents || []).length} timeline events recorded`, cls: "ok" };
     }
-    case "fanout": return { text: `${ctx.state.tokens.toFixed(1)} ${labels.bucketLabel.toLowerCase()} remaining`, cls: ctx.state.tokens < 1 ? "warn" : "ok" };
+    case "fanout": {
+      const headroom = ctx.state.tokens;
+      const capVal = ctx.params.cap;
+      const load = ctx.state.lastFanoutLoad || fanoutLoad(ctx);
+      return {
+        text: `${headroom.toFixed(0)} ${labels.bucketLabel.toLowerCase()} — last wave ${load} req`,
+        cls: headroom < 1 ? "err" : headroom < capVal * 0.25 ? "warn" : "ok",
+      };
+    }
     default: return { text: `${ctx.state.tokens.toFixed(1)} tokens available`, cls: "ok" };
   }
 }

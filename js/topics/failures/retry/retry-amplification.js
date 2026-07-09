@@ -36,7 +36,27 @@ export const content = {
 <p>Interview tip: whiteboard the charge flow, mark where <b>Retry Amplification</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
   ],
   figures: [
-    { id: "retry-amp", svg: `<svg viewBox="0 0 420 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Retry Amplification retries"> <defs><marker id="fig-retry-amplification-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs> <rect x="30" y="40" width="70" height="36" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/> <text x="65" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Client</text><text x="65" y="68" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">×3 retry</text> <rect x="130" y="40" width="90" height="36" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/> <text x="175" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Client</text><text x="175" y="68" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">×3 retry</text> <rect x="250" y="40" width="90" height="36" rx="6" fill="#1a2236" stroke="#ff5c6c" stroke-width="1.5"/> <text x="295" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Backend</text><text x="295" y="68" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">overloaded</text> <line x1="100" y1="58" x2="128" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-retry-amplification-arr)"/> <line x1="100" y1="58" x2="128" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-retry-amplification-arr)"/> <line x1="220" y1="58" x2="248" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-retry-amplification-arr)"/> <text x="210" y="95" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">N clients × R retries = N×R load</text> </svg>`, caption: `Retry Amplification: retries multiply load on a degraded backend — use backoff and circuit breakers.` },
+    { id: "retry-chain", svg: `<svg viewBox="0 0 520 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Retry amplification across service chain">
+  <defs><marker id="fig-retry-amplification-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
+  <rect x="24" y="44" width="52" height="32" rx="5" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
+  <text x="50" y="64" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">C1</text>
+  <rect x="24" y="84" width="52" height="32" rx="5" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
+  <text x="50" y="104" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">C2</text>
+  <rect x="120" y="58" width="72" height="36" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
+  <text x="156" y="80" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Gateway</text>
+  <rect x="230" y="58" width="80" height="36" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
+  <text x="270" y="80" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Order svc</text>
+  <rect x="350" y="58" width="80" height="36" rx="6" fill="#1a2236" stroke="#ff5c6c" stroke-width="1.5"/>
+  <text x="390" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
+  <text x="390" y="88" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">leaf hot</text>
+  <line x1="76" y1="60" x2="118" y2="72" stroke="#5b9dff" stroke-width="1.2" marker-end="url(#fig-retry-amplification-arr)"/>
+  <line x1="76" y1="100" x2="118" y2="82" stroke="#5b9dff" stroke-width="1.2" marker-end="url(#fig-retry-amplification-arr)"/>
+  <line x1="192" y1="76" x2="228" y2="76" stroke="#ffb454" stroke-width="1.5" marker-end="url(#fig-retry-amplification-arr)"/>
+  <text x="210" y="68" text-anchor="middle" fill="#ffb454" font-size="9" font-family="system-ui">retry</text>
+  <line x1="310" y1="76" x2="348" y2="76" stroke="#ffb454" stroke-width="1.5" marker-end="url(#fig-retry-amplification-arr)"/>
+  <text x="329" y="68" text-anchor="middle" fill="#ffb454" font-size="9" font-family="system-ui">retry</text>
+  <text x="260" y="28" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">N clients × R retries × hops → leaf overload</text>
+</svg>`, caption: `Retry amplification: each tier retries on timeout — load multiplies down the call chain to the leaf service.` },
   ],
   related: [],
 };
