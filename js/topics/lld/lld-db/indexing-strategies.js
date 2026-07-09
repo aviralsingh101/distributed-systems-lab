@@ -30,155 +30,53 @@ const topic = makeTopic({
   archetype: "concept",
   oneliner: `Choosing the right index — B-tree, composite, covering, or partial — so the planner can find rows without scanning the table.`,
   sections: [
-    { title: `What an index buys you`, body: `<p>An <b>index</b> is a secondary data structure that lets the database locate rows without reading the whole table. The default in every relational database is the <b>B-tree</b> (technically a B+tree): a balanced, sorted tree with a large fan-out, so a lookup is <code>O(log n)</code> page reads from root to leaf. Because the leaves are kept in sorted order and linked, a B-tree serves equality (<code>=</code>), range (<code>&lt;</code>, <code>BETWEEN</code>), prefix (<code>LIKE 'abc%'</code>), and <code>ORDER BY</code> — all from the same structure.</p>
-<p>Indexes are not free: every index must be updated on <code>INSERT</code>, <code>UPDATE</code>, and <code>DELETE</code>, and it consumes storage and cache. So the goal is the <em>smallest set of indexes</em> that covers your real query shapes, not one index per column.</p>
-<pre>@Entity
-@Table(name = "ledger_entries",
-       indexes = {
-           @Index(name = "idx_ledger_wallet_created",
-                  columnList = "wallet_id, created_at"),
-           @Index(name = "idx_ledger_payment_id",
-                  columnList = "payment_id")
-       })
-public class LedgerEntry {
+    { title: `What an index buys you`, body: `<p>An <b>index</b> lets the database locate rows without reading the whole table. The default is a <b>B-tree</b> (B+tree): balanced, sorted, <code>O(log n)</code> page reads from root to leaf. Leaves are linked in order, so equality, range, prefix <code>LIKE</code>, and <code>ORDER BY</code> share one structure.</p>
+<p>At the leaf, the entry either points to the row's location in the heap (Postgres) or <em>contains</em> the row (InnoDB clustered primary key). Indexes cost write amplification and storage on every <code>INSERT</code>/<code>UPDATE</code>/<code>DELETE</code> — aim for the smallest set that covers your real query shapes, not one index per column.</p>
+<pre>CREATE INDEX idx_ledger_wallet_created
+  ON ledger_entry (wallet_id, created_at);
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+CREATE INDEX idx_ledger_payment_id
+  ON ledger_entry (payment_id);</pre>` },
+    { title: `How a B-tree lookup works`, figureAfter: "btree", body: `<p>For <code>WHERE id = 60</code> the engine descends from root to leaf. For <code>WHERE created_at BETWEEN a AND b</code> it descends once to the first match, then walks linked leaves — no re-descent per row.</p>
+<p>Use <code>EXPLAIN (ANALYZE, BUFFERS)</code> to verify the planner picks your index (look for <code>Index Scan</code> or <code>Index Only Scan</code>, not <code>Seq Scan</code> on large tables).</p>
+<pre>-- Uses idx_ledger_wallet_created: equality on wallet_id + sort on created_at
+SELECT *
+FROM ledger_entry
+WHERE wallet_id = :walletId
+ORDER BY created_at DESC
+LIMIT 20;
 
-    @Column(name = "wallet_id", nullable = false)
-    private String walletId;
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT * FROM ledger_entry WHERE wallet_id = :walletId ORDER BY created_at DESC LIMIT 20;</pre>` },
+    { title: `Composite and covering indexes`, body: `<p>A composite index on <code>(a, b, c)</code> follows the <b>leftmost-prefix rule</b>: supports <code>a</code>, <code>(a,b)</code>, <code>(a,b,c)</code> — not <code>b</code> alone. Put equality columns first, range/sort last.</p>
+<p>A <b>covering index</b> includes every column the query needs, so the engine answers from the index alone (<b>index-only scan</b>) without fetching the heap row. Postgres adds non-key payload columns with <code>INCLUDE</code>:</p>
+<p>Example: "recent entries and amounts for a wallet" with <code>INCLUDE (amount_minor)</code> needs no table fetch at all.</p>
+<pre>CREATE INDEX idx_entry_wallet_created
+  ON ledger_entry (wallet_id, created_at)
+  INCLUDE (amount_minor);
 
-    @Column(name = "payment_id")
-    private String paymentId;
+CREATE INDEX idx_payment_wallet_status_created
+  ON payment (wallet_id, status, created_at);</pre>` },
+    { title: `Partial indexes`, body: `<p>A <b>partial index</b> indexes only rows matching a predicate — smaller and cheaper to maintain:</p>
+<pre>CREATE INDEX idx_orders_pending
+  ON "order" (created_at)
+  WHERE status = 'PENDING';
 
-    @Column(name = "amount_minor", nullable = false)
-    private long amountMinor;
+CREATE UNIQUE INDEX uq_wallet_email_live
+  ON wallet (owner_email)
+  WHERE deleted_at IS NULL;</pre>
+<p>Perfect for work-queue queries that only scan pending rows — if pending orders are 1% of the table, the index is ~1% of the size and much faster to maintain. Partial unique indexes also enforce conditional uniqueness: same email allowed on soft-deleted rows, unique among live rows.</p>` },
+    { title: `Pagination: offset vs cursor`, body: `<p><b>OFFSET</b> (<code>LIMIT 20 OFFSET 10000</code>) walks and discards rows — cost grows with depth and is unstable under concurrent inserts. <b>Keyset (cursor) pagination</b> remembers the last sort key:</p>
+<pre>CREATE INDEX idx_ledger_wallet_created_id
+  ON ledger_entry (wallet_id, created_at DESC, id DESC);
 
-    @Column(name = "created_at", nullable = false)
-    private Instant createdAt;
-}</pre>` },
-    { title: `How a B-tree lookup works`, figureAfter: "btree", body: `<p>To resolve <code>WHERE id = 60</code> the engine starts at the root, compares against the separator keys to pick a child, and descends until it reaches the leaf holding 60. The leaf entry points to the row's location in the heap (in Postgres, a table row identifier; in a clustered table like InnoDB's primary key, the leaf <em>contains</em> the row). A range query like <code>WHERE created_at BETWEEN a AND b</code> descends once to the first match, then walks the linked leaves in order — no re-descent per row.</p>
-<pre>// Query backed by idx_ledger_wallet_created — one O(log n) descent
-@Repository
-public interface LedgerEntryRepository extends JpaRepository&lt;LedgerEntry, Long&gt; {
-
-    List&lt;LedgerEntry&gt; findByWalletIdOrderByCreatedAtDesc(
-        String walletId, Pageable pageable);
-
-    // Uses composite index (wallet_id, created_at) for equality + sort
-    @Query("""
-        SELECT e FROM LedgerEntry e
-        WHERE e.walletId = :walletId
-        ORDER BY e.createdAt DESC
-        """)
-    List&lt;LedgerEntry&gt; recentEntries(
-        @Param("walletId") String walletId,
-        Pageable pageable);
-}</pre>` },
-    { title: `Composite and covering indexes`, body: `<p>A <b>composite index</b> on <code>(a, b, c)</code> is sorted by <code>a</code>, then <code>b</code>, then <code>c</code>. This is the <b>leftmost-prefix rule</b>: it supports predicates on <code>a</code>, on <code>(a, b)</code>, and on <code>(a, b, c)</code>, but not on <code>b</code> alone. Column order matters — put equality columns first and the range/sort column last.</p>
-<p>A <b>covering index</b> includes every column a query needs, so the query is answered <em>from the index alone</em> without touching the table (an "index-only scan"). In Postgres you add non-key payload columns with <code>INCLUDE</code>:</p>
-<p><code>CREATE INDEX idx_entry_wallet_created ON ledger_entry (wallet_id, created_at) INCLUDE (amount);</code></p>
-<p>Now "recent entries and amounts for a wallet" needs no heap fetch at all.</p>
-<pre>@Entity
-@Table(name = "payments",
-       indexes = {
-           // Composite: equality on wallet_id, range/sort on created_at
-           @Index(name = "idx_payment_wallet_status_created",
-                  columnList = "wallet_id, status, created_at"),
-           // Covering: all columns needed for balance summary query
-           @Index(name = "idx_payment_wallet_amount",
-                  columnList = "wallet_id, amount_minor, status")
-       })
-public class Payment {
-
-    @Id
-    private String id;
-
-    @Column(name = "wallet_id", nullable = false)
-    private String walletId;
-
-    @Enumerated(EnumType.STRING)
-    @Column(name = "status", nullable = false)
-    private PaymentStatus status;
-
-    @Column(name = "amount_minor", nullable = false)
-    private long amountMinor;
-
-    @Column(name = "created_at", nullable = false)
-    private Instant createdAt;
-}</pre>` },
-    { title: `Partial indexes`, body: `<p>A <b>partial index</b> indexes only the rows matching a predicate, keeping it small and cheap to maintain:</p>
-<p><code>CREATE INDEX idx_orders_pending ON "order" (created_at) WHERE status = 'PENDING';</code></p>
-<p>If pending orders are 1% of the table, this index is 1% of the size and is the perfect fit for the "work queue" query that only ever looks at pending rows. Partial indexes also enforce conditional uniqueness — <code>CREATE UNIQUE INDEX ... WHERE deleted_at IS NULL</code> keeps emails unique among live rows while allowing soft-deleted duplicates.</p>
-<pre>// Partial index via DDL migration (JPA @Index does not support WHERE clause)
-// CREATE INDEX idx_payment_pending
-//   ON payments (created_at) WHERE status = 'PENDING';
-
-@Entity
-@Table(name = "payments")
-public class Payment {
-
-    @Id
-    private String id;
-
-    @Enumerated(EnumType.STRING)
-    @Column(name = "status", nullable = false)
-    private PaymentStatus status;
-
-    @Column(name = "created_at", nullable = false)
-    private Instant createdAt;
-}
-
-@Repository
-public interface PaymentRepository extends JpaRepository&lt;Payment, String&gt; {
-
-    // Benefits from idx_payment_pending — small, fast work-queue scan
-    @Query("""
-        SELECT p FROM Payment p
-        WHERE p.status = 'PENDING'
-        ORDER BY p.createdAt ASC
-        """)
-    List&lt;Payment&gt; findPendingPayments(Pageable pageable);
-}</pre>` },
-    { title: `Pagination: offset vs cursor`, body: `<p>Indexing interacts directly with how you page. <b>OFFSET pagination</b> (<code>LIMIT 20 OFFSET 10000</code>) forces the engine to walk and discard the first 10,000 matches on every page — cost grows with page depth, and rows inserted mid-scroll cause skipped or repeated items. <b>Cursor (keyset) pagination</b> instead remembers the last row's sort key and asks for the next slice:</p>
-<p><code>SELECT * FROM ledger_entry WHERE wallet_id = :w AND (created_at, id) &lt; (:last_ts, :last_id) ORDER BY created_at DESC, id DESC LIMIT 20;</code></p>
-<p>Backed by an index on <code>(wallet_id, created_at, id)</code>, every page is an <code>O(log n)</code> seek plus a short scan, and it is stable under concurrent inserts. Use keyset pagination for deep or infinite scroll; reserve OFFSET for small, bounded result sets.</p>
-<pre>@Entity
-@Table(name = "ledger_entries",
-       indexes = @Index(name = "idx_ledger_wallet_created_id",
-                        columnList = "wallet_id, created_at, id"))
-public class LedgerEntry {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
-    @Column(name = "wallet_id", nullable = false)
-    private String walletId;
-
-    @Column(name = "created_at", nullable = false)
-    private Instant createdAt;
-}
-
-@Repository
-public interface LedgerEntryRepository extends JpaRepository&lt;LedgerEntry, Long&gt; {
-
-    // Keyset pagination — indexed seek, stable under concurrent inserts
-    @Query("""
-        SELECT e FROM LedgerEntry e
-        WHERE e.walletId = :walletId
-          AND (:cursorTs IS NULL
-               OR e.createdAt &lt; :cursorTs
-               OR (e.createdAt = :cursorTs AND e.id &lt; :cursorId))
-        ORDER BY e.createdAt DESC, e.id DESC
-        LIMIT :limit
-        """)
-    List&lt;LedgerEntry&gt; findKeysetPage(
-        @Param("walletId") String walletId,
-        @Param("cursorTs") Instant cursorTs,
-        @Param("cursorId") Long cursorId,
-        @Param("limit") int limit);
-}</pre>` },
+SELECT *
+FROM ledger_entry
+WHERE wallet_id = :walletId
+  AND (created_at, id) &lt; (:lastTs, :lastId)
+ORDER BY created_at DESC, id DESC
+LIMIT 20;</pre>
+<p>Every page is an <code>O(log n)</code> seek plus a short scan — stable under concurrent inserts because you never skip or repeat rows by page number. Use keyset for infinite scroll and deep pagination; reserve OFFSET for small bounded admin pages (first few pages only).</p>` },
   ],
   figures: [
     { id: "btree", svg: BTREE_SVG, caption: "A B-tree: descend from root through internal nodes to a sorted, linked leaf level. Equality and range queries both start with one O(log n) descent." },

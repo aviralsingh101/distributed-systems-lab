@@ -31,155 +31,65 @@ const topic = makeTopic({
   archetype: "concept",
   oneliner: `The design language for a relational schema — entities, attributes, and the cardinality of the relationships between them.`,
   sections: [
-    { title: `What ER modeling is`, body: `<p><b>Entity-Relationship (ER) modeling</b> is the technique for turning a domain into a relational schema before writing any DDL. You identify the <b>entities</b> (nouns the business cares about — Customer, Order, Wallet, Ledger), the <b>attributes</b> that describe each one, and the <b>relationships</b> that connect them. The output is a conceptual model that maps almost mechanically onto tables, columns, primary keys, and foreign keys.</p>
-<p>The goal is a schema where every fact lives in exactly one place and every relationship is enforceable by the database rather than by hope. Get the entities and cardinalities right early: reshaping a relationship after millions of rows exist is a migration, not an edit.</p>
-<pre>// Domain records — ER concepts before JPA mapping
-public record WalletId(String value) {}
-public record PaymentId(String value) {}
-
-public record WalletSummary(
-    WalletId id,
-    long balanceMinor,
-    String currency,
-    String ownerEmail
-) {}
-
-public record PaymentSummary(
-    PaymentId id,
-    WalletId walletId,
-    long amountMinor,
-    String status
-) {}</pre>` },
-    { title: `Entities, attributes, and keys`, body: `<p>An <b>entity</b> becomes a table; an <b>entity instance</b> becomes a row. Each entity needs a <b>key</b> — an attribute (or set of attributes) that uniquely identifies a row. A <b>candidate key</b> is any minimal unique identifier; the one you choose to reference is the <b>primary key</b>. Attributes that only make sense in combination with the entity (an order's <em>total</em>, a wallet's <em>balance</em>) live as columns on that table.</p>
-<p>Prefer a stable surrogate key (an auto-generated <code>BIGINT</code> or <code>UUID</code>) as the primary key, and enforce real-world uniqueness separately with a <code>UNIQUE</code> constraint (for example <code>email</code> on Customer). This keeps foreign keys narrow and lets natural values change without cascading rewrites.</p>
-<pre>@Entity
-@Table(name = "wallets",
-       uniqueConstraints = @UniqueConstraint(name = "uq_wallet_email",
-                                             columnNames = "owner_email"))
-public class Wallet {
-
-    @Id
-    @Column(name = "id", length = 36)
-    private String id;
-
-    @Column(name = "balance_minor", nullable = false)
-    private long balanceMinor;
-
-    @Column(name = "currency", nullable = false, length = 3)
-    private String currency;
-
-    @Column(name = "owner_email")
-    private String ownerEmail;
-}</pre>` },
-    { title: `Relationships and cardinality`, figureAfter: "er-diagram", body: `<p>A relationship connects two entities, and its <b>cardinality</b> says how many instances participate on each side:</p>
+    { title: `What ER modeling is`, body: `<p><b>Entity-Relationship (ER) modeling</b> is the technique for turning a domain into a relational schema before writing DDL. You identify <b>entities</b> (nouns the business cares about — Customer, Order, Wallet, Ledger), the <b>attributes</b> that describe each one, and the <b>relationships</b> that connect them. The output maps almost mechanically onto tables, columns, primary keys, and foreign keys.</p>
+<p>The goal is a schema where every fact lives in exactly one place and every relationship is enforceable by the database. Get entities and cardinalities right early — reshaping a relationship after millions of rows exist is a migration, not an edit.</p>
+<p>Start with domain nouns on a whiteboard (Wallet, Payment, LedgerEntry) and their attributes <em>before</em> ORM mapping or API design — ER modeling is about the data model, not the programming language.</p>` },
+    { title: `Entities, attributes, and keys`, body: `<p>An <b>entity</b> becomes a table; an <b>entity instance</b> becomes a row. Each entity needs a <b>key</b> — an attribute (or set) that uniquely identifies a row. A <b>candidate key</b> is any minimal unique identifier; the one you reference is the <b>primary key</b>.</p>
+<p>Prefer a stable surrogate key (UUID or <code>BIGSERIAL</code>) as the primary key, and enforce real-world uniqueness with a separate <code>UNIQUE</code> constraint (e.g. <code>owner_email</code> on Wallet). This keeps foreign keys narrow and lets natural values change without cascading rewrites.</p>
+<pre>CREATE TABLE wallet (
+  id            TEXT PRIMARY KEY,           -- surrogate
+  balance_minor BIGINT NOT NULL,
+  currency      CHAR(3) NOT NULL,
+  owner_email   TEXT UNIQUE                 -- natural uniqueness, not the PK
+);</pre>` },
+    { title: `Relationships and cardinality`, figureAfter: "er-diagram", body: `<p>A relationship connects two entities; its <b>cardinality</b> says how many instances participate on each side:</p>
 <ul>
-<li><b>One-to-many (1:N)</b> — the common case. One Customer has many Orders. Implemented by putting a foreign key (<code>customer_id</code>) on the <em>many</em> side (Order).</li>
-<li><b>One-to-one (1:1)</b> — a Wallet has exactly one balance snapshot. Implemented as a shared/unique foreign key, or by keeping the columns on one table.</li>
-<li><b>Many-to-many (M:N)</b> — Orders and Products. A relational schema cannot store this directly; you introduce a <b>junction (associative) table</b> whose primary key is the pair of foreign keys.</li>
+<li><b>One-to-many (1:N)</b> — one Customer has many Orders. Put <code>customer_id</code> on the <em>many</em> side (Order).</li>
+<li><b>One-to-one (1:1)</b> — e.g. one Wallet has one current balance snapshot. Implement as shared primary key, or columns on one table, or a unique FK on the dependent side.</li>
+<li><b>Many-to-many (M:N)</b> — e.g. Orders and Products. Introduce a <b>junction table</b> (<code>order_item</code>) whose primary key is the pair of foreign keys, often with extra columns like <code>qty</code>.</li>
 </ul>
-<p><b>Optionality (participation)</b> is the other half: is the foreign key <code>NOT NULL</code> (mandatory) or nullable (optional)? An Order that must belong to a Customer uses <code>customer_id BIGINT NOT NULL REFERENCES customer(id)</code>.</p>
-<pre>// 1:N — one Wallet has many Payments (FK on the many side)
-@Entity
-@Table(name = "payments")
-public class Payment {
+<p><b>Optionality:</b> <code>customer_id BIGINT NOT NULL REFERENCES customer(id)</code> means every order must belong to a customer; nullable FK means optional participation.</p>
+<pre>-- 1:N — one wallet, many payments (FK on the many side)
+CREATE TABLE payment (
+  id           TEXT PRIMARY KEY,
+  wallet_id    TEXT NOT NULL REFERENCES wallet(id),
+  amount_minor BIGINT NOT NULL,
+  status       TEXT NOT NULL
+);
 
-    @Id
-    private String id;
-
-    @ManyToOne(optional = false)
-    @JoinColumn(name = "wallet_id", nullable = false)
-    private Wallet wallet;
-
-    @Column(name = "amount_minor", nullable = false)
-    private long amountMinor;
-
-    @Enumerated(EnumType.STRING)
-    @Column(name = "status", nullable = false)
-    private PaymentStatus status;
-}
-
-// 1:N — one Payment has many LedgerEntries
-@Entity
-@Table(name = "ledger_entries")
-public class LedgerEntry {
-
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
-    @ManyToOne(optional = false)
-    @JoinColumn(name = "payment_id")
-    private Payment payment;
-
-    @ManyToOne(optional = false)
-    @JoinColumn(name = "wallet_id", nullable = false)
-    private Wallet wallet;
-
-    @Column(name = "amount_minor", nullable = false)
-    private long amountMinor;
-}</pre>` },
-    { title: `How an ER model becomes tables`, body: `<p>Here is how it works — translation is largely mechanical, which is why the modeling step pays off:</p>
+-- 1:N — one payment, many ledger entries
+CREATE TABLE ledger_entry (
+  id           BIGSERIAL PRIMARY KEY,
+  payment_id   TEXT NOT NULL REFERENCES payment(id),
+  wallet_id    TEXT NOT NULL REFERENCES wallet(id),
+  amount_minor BIGINT NOT NULL
+);</pre>` },
+    { title: `How an ER model becomes tables`, body: `<p>Translation is largely mechanical:</p>
 <ol>
 <li>Each strong entity → one table with its primary key.</li>
-<li>Each 1:N relationship → a foreign key column on the many side.</li>
-<li>Each M:N relationship → a junction table with two foreign keys and a composite primary key.</li>
-<li>Each multi-valued attribute → its own child table (a customer with many addresses is not three <code>address1/2/3</code> columns).</li>
+<li>Each 1:N relationship → a foreign key on the many side.</li>
+<li>Each M:N relationship → a junction table with two FKs and a composite primary key.</li>
+<li>Each multi-valued attribute → its own child table (not <code>address1/2/3</code> columns).</li>
 </ol>
-<p>A many-to-many junction for order lines looks like:</p>
-<p><code>CREATE TABLE order_item (order_id BIGINT REFERENCES "order"(id), product_id BIGINT REFERENCES product(id), qty INT NOT NULL, PRIMARY KEY (order_id, product_id));</code></p>
-<pre>// M:N junction — Payment tags (many payments, many tags)
-@Entity
-@Table(name = "payment_tags")
-@IdClass(PaymentTagId.class)
-public class PaymentTag {
+<pre>-- M:N junction — payments and tags
+CREATE TABLE tag (
+  id   BIGSERIAL PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE
+);
 
-    @Id
-    @ManyToOne
-    @JoinColumn(name = "payment_id")
-    private Payment payment;
-
-    @Id
-    @ManyToOne
-    @JoinColumn(name = "tag_id")
-    private Tag tag;
-}
-
-@Entity
-@Table(name = "tags")
-public class Tag {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
-    @Column(name = "name", nullable = false, unique = true)
-    private String name;
-}</pre>` },
-    { title: `Common modeling mistakes`, body: `<p><b>Repeating groups</b> (comma-separated lists in a column, or numbered columns) signal a missing child table. <b>Overloaded entities</b> — one <code>account</code> table that is sometimes a customer and sometimes a merchant — usually want either separate tables or a clear type discriminator with disjoint attributes. <b>Missing junction tables</b> force application code to fake M:N with duplicated rows.</p>
-<p>Finally, model the relationship <em>direction of ownership</em> deliberately: in a payment system a Ledger entry belongs to exactly one Wallet, so the foreign key and the delete/retention rules live on the Ledger side. Getting ownership right is what makes normalization and referential integrity fall out naturally in the next steps.</p>
-<pre>// Ownership direction: LedgerEntry belongs to Wallet — FK on ledger side
-@Entity
-@Table(name = "ledger_entries")
-public class LedgerEntry {
-
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
-    // Mandatory participation: every entry MUST have a wallet
-    @ManyToOne(optional = false)
-    @JoinColumn(name = "wallet_id", nullable = false,
-                foreignKey = @ForeignKey(
-                    name = "fk_ledger_wallet",
-                    foreignKeyDefinition =
-                        "FOREIGN KEY (wallet_id) REFERENCES wallets(id) ON DELETE RESTRICT"))
-    private Wallet wallet;
-
-    @Column(name = "amount_minor", nullable = false)
-    private long amountMinor;
-
-    @Column(name = "created_at", nullable = false)
-    private Instant createdAt;
-}</pre>` },
+CREATE TABLE payment_tag (
+  payment_id TEXT NOT NULL REFERENCES payment(id),
+  tag_id     BIGINT NOT NULL REFERENCES tag(id),
+  PRIMARY KEY (payment_id, tag_id)
+);</pre>` },
+    { title: `Common modeling mistakes`, body: `<p><b>Repeating groups</b> (comma-separated tag lists, <code>address1/2/3</code> columns) signal a missing child table — each value gets its own row. <b>Overloaded entities</b> — one <code>account</code> table that is sometimes customer and sometimes merchant — usually want separate tables or a clear type discriminator with disjoint attributes. <b>Missing junction tables</b> force application code to fake M:N with duplicated rows or JSON blobs the database cannot join efficiently.</p>
+<p>Model <em>ownership direction</em> deliberately: a ledger entry belongs to exactly one wallet, so the FK, retention policy, and <code>ON DELETE RESTRICT</code> live on the ledger side — you should not be able to delete a wallet that still has ledger history.</p>
+<pre>CREATE TABLE ledger_entry (
+  id           BIGSERIAL PRIMARY KEY,
+  wallet_id    TEXT NOT NULL REFERENCES wallet(id) ON DELETE RESTRICT,
+  amount_minor BIGINT NOT NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);</pre>` },
   ],
   figures: [
     { id: "er-diagram", svg: ER_SVG, caption: "A 1:N chain: Customer → Order → OrderItem. Foreign keys live on the many side; the crow's-foot 1:N label captures cardinality." },
