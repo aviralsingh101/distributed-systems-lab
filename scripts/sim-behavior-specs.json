@@ -1,0 +1,2386 @@
+{
+  "version": 1,
+  "topics": {
+    "dns": {
+      "cases": [
+        {
+          "setup": {
+            "toggles": {}
+          },
+          "action": "resolve",
+          "tickSeconds": 3,
+          "expect": {
+            "lastTarget": "regionA",
+            "statusIncludes": "Region A"
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "failover": true
+            }
+          },
+          "action": "resolve",
+          "tickSeconds": 3,
+          "expect": {
+            "lastTarget": "regionB",
+            "statusIncludes": "Region B"
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "failover": true,
+              "cached": true
+            }
+          },
+          "action": "resolve",
+          "tickSeconds": 3,
+          "expect": {
+            "lastTarget": "regionA",
+            "statusCls": "err"
+          }
+        }
+      ]
+    },
+    "load-balancer-l4-l7": {
+      "cases": [
+        {
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "lastTarget": "backendB",
+            "statusIncludes": "L4"
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "backendDown": true
+            }
+          },
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "lastTarget": "backendA",
+            "statusIncludes": "healthy"
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "l7": true
+            }
+          },
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "lastTarget": "backendB",
+            "statusIncludes": "L7"
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "l7": true,
+              "backendDown": true
+            }
+          },
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "lastTarget": "backendA",
+            "statusIncludes": "healthy"
+          }
+        }
+      ]
+    },
+    "api-gateway": {
+      "cases": [
+        {
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "lastTarget": "service",
+            "statusCls": "ok"
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "noAuth": true
+            }
+          },
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "statusIncludes": "401",
+            "statusCls": "err"
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "overQuota": true
+            }
+          },
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "statusIncludes": "429",
+            "statusCls": "warn"
+          }
+        }
+      ]
+    },
+    "cdn": {
+      "cases": [
+        {
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "lastTarget": "origin",
+            "statusIncludes": "MISS"
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "cacheHit": true
+            }
+          },
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "lastTarget": "cdn",
+            "statusIncludes": "HIT"
+          }
+        }
+      ]
+    },
+    "reverse-proxy": {
+      "cases": [
+        {
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "lastTarget": "pod2",
+            "statusIncludes": "least_conn",
+            "statusCls": "ok"
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "podDown": true
+            }
+          },
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "lastTarget": "pod1",
+            "statusIncludes": "skipped",
+            "statusCls": "ok"
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "bypass": true
+            }
+          },
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "lastTarget": "pod2",
+            "statusCls": "warn"
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "bypass": true,
+              "podDown": true
+            }
+          },
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "statusIncludes": "dead",
+            "statusCls": "err"
+          }
+        }
+      ]
+    },
+    "message-queues": {
+      "cases": [
+        {
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "lastTarget": "consumer",
+            "statusIncludes": "Async",
+            "statusCls": "ok"
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "poison": true
+            }
+          },
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "lastTarget": "dlq",
+            "statusIncludes": "DLQ",
+            "statusCls": "warn"
+          }
+        }
+      ]
+    },
+    "service-mesh": {
+      "cases": [
+        {
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "lastTarget": "svcB",
+            "statusIncludes": "mTLS",
+            "statusCls": "ok"
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "mesh": false
+            }
+          },
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "lastTarget": "svcB",
+            "statusIncludes": "Direct",
+            "statusCls": "warn"
+          }
+        }
+      ]
+    },
+    "url-shortener": {
+      "cases": [
+        {
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "lastTarget": "db",
+            "statusIncludes": "miss"
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "cacheHit": true
+            }
+          },
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "lastTarget": "redis",
+            "statusIncludes": "cache",
+            "statusCls": "ok"
+          }
+        }
+      ]
+    },
+    "rate-limiter-service": {
+      "cases": [
+        {
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "lastTarget": "api",
+            "statusCls": "ok"
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "statusIncludes": "429",
+            "statusCls": "err"
+          }
+        }
+      ]
+    },
+    "news-feed": {
+      "cases": [
+        {
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "lastTarget": "feeds",
+            "statusIncludes": "Fan-out",
+            "statusCls": "ok"
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "fanOutWrite": false
+            }
+          },
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "lastTarget": "posts",
+            "statusIncludes": "Pull",
+            "statusCls": "ok"
+          }
+        }
+      ]
+    },
+    "chat-system": {
+      "cases": [
+        {
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "lastTarget": "room",
+            "statusIncludes": "WebSocket",
+            "statusCls": "ok"
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "offline": true
+            }
+          },
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "lastTarget": "store",
+            "statusIncludes": "offline",
+            "statusCls": "warn"
+          }
+        }
+      ]
+    },
+    "payment-system-hld": {
+      "cases": [
+        {
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "lastTarget": "ledger",
+            "statusIncludes": "captured",
+            "statusCls": "ok"
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "duplicate": true
+            }
+          },
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "lastTarget": "order",
+            "statusIncludes": "Duplicate",
+            "statusCls": "warn"
+          }
+        }
+      ]
+    },
+    "ticket-booking": {
+      "cases": [
+        {
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "lastTarget": "inventory",
+            "statusIncludes": "held",
+            "statusCls": "ok"
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "soldOut": true
+            }
+          },
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "statusIncludes": "409",
+            "statusCls": "err"
+          }
+        }
+      ]
+    },
+    "thread-pool": {
+      "cases": [
+        {
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "lastTarget": "workers",
+            "statusCls": "ok"
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "saturated": true
+            }
+          },
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "statusIncludes": "Rejected",
+            "statusCls": "err"
+          }
+        }
+      ]
+    },
+    "producer-consumer": {
+      "cases": [
+        {
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "lastTarget": "consumer",
+            "statusIncludes": "Steady",
+            "statusCls": "ok"
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "slowConsumer": true
+            }
+          },
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "statusIncludes": "backing up",
+            "statusCls": "warn"
+          }
+        }
+      ]
+    },
+    "readers-writers": {
+      "cases": [
+        {
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "lastTarget": "data",
+            "statusIncludes": "readers",
+            "statusCls": "ok"
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "writer": true
+            }
+          },
+          "action": "trace",
+          "tickSeconds": 3,
+          "expect": {
+            "lastTarget": "data",
+            "statusIncludes": "exclusive",
+            "statusCls": "warn"
+          }
+        }
+      ]
+    },
+    "cache-aside": {
+      "cases": [
+        {
+          "setup": {
+            "toggles": {
+              "warmCache": true
+            }
+          },
+          "action": "read",
+          "expect": {
+            "statusIncludes": "hit"
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "warmCache": false
+            }
+          },
+          "action": "read",
+          "expect": {
+            "statusIncludes": "miss"
+          }
+        }
+      ]
+    },
+    "token-bucket": {
+      "cases": [
+        {
+          "action": "send",
+          "expect": {
+            "acceptedGte": 1
+          }
+        }
+      ]
+    },
+    "load-shedding": {
+      "cases": [
+        {
+          "action": "send",
+          "expect": {
+            "acceptedGte": 1
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "tickSeconds": 2,
+          "expect": {
+            "statusIncludes": "Burst",
+            "statusCls": "warn"
+          }
+        },
+        {
+          "setup": {
+            "params": {
+              "cap": 2
+            }
+          },
+          "actions": [
+            "send",
+            "send",
+            "send"
+          ],
+          "expect": {
+            "statusIncludes": "shed"
+          }
+        }
+      ]
+    },
+    "lost-update": {
+      "cases": [
+        {
+          "actions": [
+            "t1r",
+            "t2r",
+            "t1w",
+            "t2w"
+          ],
+          "expect": {
+            "statusCls": "err"
+          }
+        }
+      ]
+    },
+    "toctou": {
+      "cases": [
+        {
+          "actions": [
+            "check",
+            "unlink",
+            "create"
+          ],
+          "expect": {
+            "statusCls": "err"
+          }
+        }
+      ]
+    },
+    "write-skew": {
+      "cases": [
+        {
+          "actions": [
+            "t1r",
+            "t2r",
+            "t1w",
+            "t2w"
+          ],
+          "expect": {
+            "statusCls": "err"
+          }
+        }
+      ]
+    },
+    "circuit-breaker": {
+      "cases": [
+        {
+          "action": "fail",
+          "expect": {
+            "statusIncludes": "Open"
+          }
+        }
+      ]
+    },
+    "lru-cache": {
+      "cases": [
+        {
+          "action": "key-A-0",
+          "expect": {
+            "statusIncludes": "A"
+          }
+        }
+      ]
+    },
+    "read-your-writes": {
+      "cases": [
+        {
+          "actions": [
+            "write",
+            "read"
+          ],
+          "expect": {
+            "statusIncludes": "Replication"
+          }
+        }
+      ]
+    },
+    "transactional-outbox": {
+      "cases": [
+        {
+          "action": "commit",
+          "expect": {
+            "statusCls": "ok"
+          }
+        }
+      ]
+    },
+    "read-replica-routing": {
+      "cases": [
+        {
+          "action": "read",
+          "expect": {
+            "statusIncludes": "Fresh"
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "stale": true
+            }
+          },
+          "action": "read",
+          "expect": {
+            "statusIncludes": "Stale"
+          }
+        }
+      ]
+    },
+    "cap-theorem": {
+      "cases": [
+        {
+          "action": "cpWrite",
+          "tickSeconds": 3,
+          "expect": {
+            "statusIncludes": "consistent",
+            "statusCls": "ok"
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "partition": true
+            }
+          },
+          "action": "cpWrite",
+          "tickSeconds": 3,
+          "expect": {
+            "statusIncludes": "unavailable",
+            "statusCls": "err"
+          }
+        },
+        {
+          "action": "apWrite",
+          "tickSeconds": 3,
+          "expect": {
+            "statusIncludes": "accepted",
+            "statusCls": "ok"
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "partition": true
+            }
+          },
+          "action": "apWrite",
+          "tickSeconds": 3,
+          "expect": {
+            "statusIncludes": "diverged",
+            "statusCls": "warn"
+          }
+        }
+      ]
+    },
+    "grpc": {
+      "cases": [
+        {
+          "action": "call",
+          "expect": {
+            "statusIncludes": "Unary"
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "streaming": true
+            }
+          },
+          "action": "call",
+          "expect": {
+            "statusIncludes": "streaming"
+          }
+        }
+      ]
+    },
+    "singleton": {
+      "cases": [
+        {
+          "action": "get",
+          "expect": {
+            "statusCls": "ok"
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "multiProcess": true
+            }
+          },
+          "action": "get",
+          "expect": {
+            "statusCls": "err"
+          }
+        }
+      ]
+    },
+    "optimistic": {
+      "cases": [
+        {
+          "action": "save",
+          "expect": {
+            "statusIncludes": "Committed"
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "conflict": true
+            }
+          },
+          "action": "save",
+          "expect": {
+            "statusIncludes": "Conflict"
+          }
+        }
+      ]
+    },
+    "two-pc": {
+      "cases": [
+        {
+          "actions": [
+            "prepare",
+            "commit"
+          ],
+          "expect": {
+            "statusIncludes": "Committed"
+          }
+        }
+      ]
+    },
+    "consensus-raft-paxos": {
+      "cases": [
+        {
+          "actions": [
+            "start",
+            "finish"
+          ],
+          "expect": {
+            "statusIncludes": "Leader"
+          }
+        },
+        {
+          "actions": [
+            "start",
+            "finish",
+            "replicate"
+          ],
+          "expect": {
+            "statusIncludes": "Committed"
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "partition": true
+            }
+          },
+          "actions": [
+            "start",
+            "finish",
+            "replicate"
+          ],
+          "expect": {
+            "statusIncludes": "Leader"
+          }
+        }
+      ]
+    },
+    "quorum-reads-writes": {
+      "cases": [
+        {
+          "action": "write",
+          "expect": {
+            "state": {
+              "current": "write_ok"
+            },
+            "statusIncludes": "Write quorum met"
+          }
+        },
+        {
+          "action": "read",
+          "expect": {
+            "state": {
+              "current": "read_ok"
+            },
+            "statusIncludes": "Read quorum met"
+          }
+        },
+        {
+          "setup": {
+            "params": {
+              "W": 3
+            },
+            "toggles": {
+              "replicaDown": true
+            }
+          },
+          "action": "write",
+          "expect": {
+            "state": {
+              "current": "write_fail"
+            }
+          }
+        }
+      ]
+    },
+    "partial-failure": {
+      "cases": [
+        {
+          "action": "start",
+          "expect": {
+            "state": {
+              "current": "healthy"
+            }
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "failOrder": true
+            }
+          },
+          "action": "start",
+          "expect": {
+            "state": {
+              "current": "degraded"
+            }
+          }
+        }
+      ]
+    },
+    "cascading-failure": {
+      "cases": [
+        {
+          "action": "fail-a",
+          "expect": {
+            "state": {
+              "current": "a-failed"
+            }
+          }
+        },
+        {
+          "actions": [
+            "fail-a",
+            "overload-b",
+            "fail-c"
+          ],
+          "expect": {
+            "state": {
+              "current": "c-failed"
+            }
+          }
+        }
+      ]
+    },
+    "http-evolution": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 6,
+          "expect": {
+            "state": {
+              "lastResult": "h1"
+            },
+            "statusIncludes": "HTTP/1.1"
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "http2": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 6,
+          "expect": {
+            "state": {
+              "lastResult": "h2"
+            },
+            "statusIncludes": "HTTP/2"
+          }
+        }
+      ]
+    },
+    "cdc-relay": {
+      "cases": [
+        {
+          "action": "run",
+          "tickSeconds": 4,
+          "expect": {
+            "lastTarget": "queue",
+            "statusIncludes": "streamed"
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "fail": true
+            }
+          },
+          "action": "run",
+          "expect": {
+            "statusIncludes": "offline",
+            "statusCls": "err"
+          }
+        }
+      ]
+    },
+    "cqrs-read-write-models": {
+      "cases": [
+        {
+          "action": "command",
+          "tickSeconds": 4,
+          "expect": {
+            "statusIncludes": "Command"
+          }
+        },
+        {
+          "setup": {
+            "toggles": {
+              "lag": true
+            }
+          },
+          "actions": [
+            "command",
+            "query"
+          ],
+          "expect": {
+            "statusIncludes": "Stale"
+          }
+        }
+      ]
+    },
+    "event-sourcing-projection": {
+      "cases": [
+        {
+          "action": "append",
+          "expect": {
+            "statusIncludes": "appended"
+          }
+        },
+        {
+          "actions": [
+            "append",
+            "project",
+            "query"
+          ],
+          "expect": {
+            "statusIncludes": "Query"
+          }
+        }
+      ]
+    },
+    "aba": {
+      "cases": [
+        {
+          "action": "pop",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "double-spend": {
+      "cases": [
+        {
+          "action": "t1r",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "phantom-read": {
+      "cases": [
+        {
+          "action": "t1r",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "dirty-read": {
+      "cases": [
+        {
+          "action": "t1w",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "non-repeatable-read": {
+      "cases": [
+        {
+          "action": "t1r",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "read-skew": {
+      "cases": [
+        {
+          "action": "t1r1",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "deadlock": {
+      "cases": [
+        {
+          "action": "t1l",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "lock-contention": {
+      "cases": [
+        {
+          "action": "t1r",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "lock-convoy": {
+      "cases": [
+        {
+          "action": "t1r",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "priority-inversion": {
+      "cases": [
+        {
+          "action": "lowl",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "livelock": {
+      "cases": [
+        {
+          "action": "a1",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "starvation": {
+      "cases": [
+        {
+          "action": "h1",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "redis-lock": {
+      "cases": [
+        {
+          "action": "a1",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "redlock": {
+      "cases": [
+        {
+          "action": "r1",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "zookeeper-lock": {
+      "cases": [
+        {
+          "action": "c1",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "etcd-lease": {
+      "cases": [
+        {
+          "action": "grant",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "lease-expiration": {
+      "cases": [
+        {
+          "action": "hold",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "fencing-tokens": {
+      "cases": [
+        {
+          "action": "old",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "idempotency-key": {
+      "cases": [
+        {
+          "action": "req1",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "exactly-once": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "deduplication": {
+      "cases": [
+        {
+          "action": "req1",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "retry-storm": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "thundering-herd": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "cache-stampede": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "dogpile": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "retry-amplification": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "coordinated-omission": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "cache-invalidation": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "cache-consistency": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "hot-key": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "cache-pollution": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "connection-pool-exhaustion": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "ephemeral-port-exhaustion": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "n-plus-one": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "slow-query-amplification": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "noisy-neighbor": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "priority-queue-starvation": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "tail-latency": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "queue-buildup": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "littles-law": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "coordinated-omission-perf": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "false-sharing": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "numa": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "context-switching": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "gc-pause": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "hedged-requests": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "request-coalescing": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "leaky-bucket": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "adaptive-concurrency": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "admission-control": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "shuffle-sharding": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "sticky-sessions": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "watermarking": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "exponential-backoff": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "connection-pooling": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        },
+        {
+          "setup": {
+            "toggles": {
+              "burst": true
+            }
+          },
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "poison-message": {
+      "cases": [
+        {
+          "action": "start",
+          "tickSeconds": 2
+        },
+        {
+          "action": "start",
+          "tickSeconds": 3
+        }
+      ]
+    },
+    "backpressure": {
+      "cases": [
+        {
+          "action": "start",
+          "tickSeconds": 2
+        },
+        {
+          "action": "start",
+          "tickSeconds": 3
+        }
+      ]
+    },
+    "slow-consumer": {
+      "cases": [
+        {
+          "action": "start",
+          "tickSeconds": 2
+        },
+        {
+          "action": "start",
+          "tickSeconds": 3
+        }
+      ]
+    },
+    "head-of-line-blocking": {
+      "cases": [
+        {
+          "action": "start",
+          "tickSeconds": 2
+        },
+        {
+          "action": "start",
+          "tickSeconds": 3
+        }
+      ]
+    },
+    "dead-letter-queue": {
+      "cases": [
+        {
+          "action": "start",
+          "tickSeconds": 2
+        },
+        {
+          "action": "start",
+          "tickSeconds": 3
+        }
+      ]
+    },
+    "visibility-timeout": {
+      "cases": [
+        {
+          "action": "start",
+          "tickSeconds": 2
+        },
+        {
+          "action": "start",
+          "tickSeconds": 3
+        }
+      ]
+    },
+    "consumer-rebalancing": {
+      "cases": [
+        {
+          "action": "start",
+          "tickSeconds": 2
+        },
+        {
+          "action": "start",
+          "tickSeconds": 3
+        }
+      ]
+    },
+    "pub-sub-pattern": {
+      "cases": [
+        {
+          "action": "start",
+          "tickSeconds": 2
+        },
+        {
+          "action": "start",
+          "tickSeconds": 3
+        }
+      ]
+    },
+    "work-queue": {
+      "cases": [
+        {
+          "action": "start",
+          "tickSeconds": 2
+        },
+        {
+          "action": "start",
+          "tickSeconds": 3
+        }
+      ]
+    },
+    "dead-letter-pattern": {
+      "cases": [
+        {
+          "action": "start",
+          "tickSeconds": 2
+        },
+        {
+          "action": "start",
+          "tickSeconds": 3
+        }
+      ]
+    },
+    "backpressure-pattern": {
+      "cases": [
+        {
+          "action": "start",
+          "tickSeconds": 2
+        },
+        {
+          "action": "start",
+          "tickSeconds": 3
+        }
+      ]
+    },
+    "outbox-inbox-combo": {
+      "cases": [
+        {
+          "action": "start",
+          "tickSeconds": 2
+        },
+        {
+          "action": "start",
+          "tickSeconds": 3
+        }
+      ]
+    },
+    "bulkhead": {
+      "cases": [
+        {
+          "action": "start",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "fail-fast": {
+      "cases": [
+        {
+          "action": "start",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "graceful-degradation": {
+      "cases": [
+        {
+          "action": "start",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "brownout": {
+      "cases": [
+        {
+          "action": "start",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "cap-theorem-framing": {
+      "cases": [
+        {
+          "action": "cp",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "pacelc": {
+      "cases": [
+        {
+          "action": "lat",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "acid": {
+      "cases": [
+        {
+          "action": "start",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "isolation-levels": {
+      "cases": [
+        {
+          "action": "ru",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "three-pc": {
+      "cases": [
+        {
+          "action": "prepare",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "saga": {
+      "cases": [
+        {
+          "action": "reserve",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "tcc": {
+      "cases": [
+        {
+          "action": "try",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "state-transition": {
+      "cases": [
+        {
+          "action": "submit",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "pessimistic": {
+      "cases": [
+        {
+          "action": "start",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "hybrid": {
+      "cases": [
+        {
+          "action": "read",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "websockets": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "eventual-consistency": {
+      "cases": [
+        {
+          "action": "read",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "monotonic-reads": {
+      "cases": [
+        {
+          "action": "read",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "session-consistency": {
+      "cases": [
+        {
+          "action": "read",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "quorum": {
+      "cases": [
+        {
+          "action": "read",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "crdt": {
+      "cases": [
+        {
+          "action": "write",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "write-through": {
+      "cases": [
+        {
+          "action": "read",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "write-around": {
+      "cases": [
+        {
+          "action": "read",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "write-back": {
+      "cases": [
+        {
+          "action": "read",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "read-through": {
+      "cases": [
+        {
+          "action": "read",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "negative-cache": {
+      "cases": [
+        {
+          "action": "read",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "strategy": {
+      "cases": [
+        {
+          "action": "run",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "observer": {
+      "cases": [
+        {
+          "action": "notify",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "state": {
+      "cases": [
+        {
+          "action": "submit",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "inbox-pattern": {
+      "cases": [
+        {
+          "action": "run",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "saga-choreography": {
+      "cases": [
+        {
+          "action": "run",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "saga-orchestration": {
+      "cases": [
+        {
+          "action": "run",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "process-manager": {
+      "cases": [
+        {
+          "action": "paymentCaptured",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "competing-consumers": {
+      "cases": [
+        {
+          "action": "run",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "pagination-offset-cursor": {
+      "cases": [
+        {
+          "action": "run",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "correlation-trace-ids": {
+      "cases": [
+        {
+          "action": "run",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "api-idempotency": {
+      "cases": [
+        {
+          "action": "run",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "hot-partition": {
+      "cases": [
+        {
+          "action": "load",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "hot-row": {
+      "cases": [
+        {
+          "action": "update",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "hot-index": {
+      "cases": [
+        {
+          "action": "add",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "secondary-index-lag": {
+      "cases": [
+        {
+          "action": "add",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "read-replica-lag": {
+      "cases": [
+        {
+          "action": "write",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "split-brain": {
+      "cases": [
+        {
+          "action": "elect",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "shard-rebalancing": {
+      "cases": [
+        {
+          "action": "add",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "consistent-hashing": {
+      "cases": [
+        {
+          "action": "addVnode",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "consistent-hashing-placement": {
+      "cases": [
+        {
+          "action": "addVnode",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "cross-shard-txn": {
+      "cases": [
+        {
+          "action": "start",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "indexing-strategies": {
+      "cases": [
+        {
+          "action": "add",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "parking-lot": {
+      "cases": [
+        {
+          "action": "add",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "elevator": {
+      "cases": [
+        {
+          "action": "add",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "in-memory-pub-sub": {
+      "cases": [
+        {
+          "action": "add",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "rate-limiter-in-process": {
+      "cases": [
+        {
+          "action": "req",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "out-of-order": {
+      "cases": [
+        {
+          "action": "e3",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "duplicate-events": {
+      "cases": [
+        {
+          "action": "add",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "missing-events": {
+      "cases": [
+        {
+          "action": "add",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "event-reordering": {
+      "cases": [
+        {
+          "action": "add",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "clock-skew": {
+      "cases": [
+        {
+          "action": "add",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "lamport-clock": {
+      "cases": [
+        {
+          "action": "send",
+          "tickSeconds": 2
+        }
+      ]
+    },
+    "vector-clock": {
+      "cases": [
+        {
+          "action": "merge",
+          "tickSeconds": 2
+        }
+      ]
+    }
+  }
+}

@@ -1,7 +1,5 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { tradeoffTemplate } from "../../../sim/templates/index.js";
 
 const topic = makeTopic({
   id: "api-versioning-strategies",
@@ -9,76 +7,133 @@ const topic = makeTopic({
   category: "lld-api",
   track: "lld",
   tier: "essential",
-  archetype: "pattern",
-  oneliner: `URL, header, or content negotiation.`,
+  archetype: "tradeoff",
+  oneliner: `How to evolve an API without breaking existing clients: version in the URL, in a header, or via media-type negotiation — each with different visibility and routing costs.`,
   sections: [
-    { title: `Motivation`, body: `<p>URL, header, or content negotiation.</p>
-<p>Without <b>API Versioning Strategies</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>API Versioning Strategies</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>API Versioning Strategies</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>API Versioning Strategies</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>API Versioning Strategies</b> changes to production:</p>
+    { title: `Why version at all`, body: `<p>Once a client depends on your API you cannot freely change it. Some changes are <b>backward-compatible</b> and need no new version — adding an optional field, a new endpoint, a new enum value a tolerant client ignores. Others are <b>breaking</b>: removing/renaming a field, changing a type, tightening validation, altering semantics. Versioning exists to ship breaking changes while old clients keep working against the old contract.</p>
+<p>The prime directive is <b>don't break existing consumers</b>. Prefer additive, non-breaking evolution (Postel's law: be liberal in what you accept); reach for a new version only when a genuinely incompatible change is unavoidable.</p>
+<pre>// v1 response — amount in minor units (cents)
+public record PaymentResponseV1(
+    String id,
+    String walletId,
+    long amountMinor,
+    String currency,
+    String status
+) {}
+
+// v2 response — breaking change: amount is a structured Money object
+public record PaymentResponseV2(
+    String id,
+    String walletId,
+    Money amount,
+    String status,
+    Instant capturedAt
+) {}
+
+public record Money(long minorUnits, String currency) {}</pre>` },
+    { title: `URL path versioning`, body: `<p><code>GET /v1/payments/123</code> → <code>/v2/payments/123</code>. The version is a visible path segment.</p>
+<p><b>Pros:</b> dead simple, obvious in logs and browsers, trivial to route (gateway sends <code>/v1</code> and <code>/v2</code> to different services), easy to explore and cache. <b>Cons:</b> it is arguably un-RESTful — the same underlying resource now has two URIs, so <code>/v1/payments/123</code> and <code>/v2/payments/123</code> are "different resources"; clients must rewrite URLs to upgrade. Despite the purist objection, this is what most large public APIs (Stripe-style major versions aside) actually use because operability wins.</p>
+<pre>// URL path versioning — separate controllers per major version
+@RestController
+@RequestMapping("/v1/payments")
+public class PaymentControllerV1 {
+
+    private final PaymentService paymentService;
+
+    public PaymentControllerV1(PaymentService paymentService) {
+        this.paymentService = paymentService;
+    }
+
+    @GetMapping("/{id}")
+    public PaymentResponseV1 getPayment(@PathVariable String id) {
+        Payment payment = paymentService.findById(id)
+            .orElseThrow(() -&gt; new PaymentNotFoundException(id));
+        return new PaymentResponseV1(
+            payment.getId(), payment.getWalletId(),
+            payment.getAmountMinor(), payment.getCurrency(),
+            payment.getStatus().name()
+        );
+    }
+}
+
+@RestController
+@RequestMapping("/v2/payments")
+public class PaymentControllerV2 {
+
+    private final PaymentService paymentService;
+
+    public PaymentControllerV2(PaymentService paymentService) {
+        this.paymentService = paymentService;
+    }
+
+    @GetMapping("/{id}")
+    public PaymentResponseV2 getPayment(@PathVariable String id) {
+        Payment payment = paymentService.findById(id)
+            .orElseThrow(() -&gt; new PaymentNotFoundException(id));
+        return new PaymentResponseV2(
+            payment.getId(), payment.getWalletId(),
+            new Money(payment.getAmountMinor(), payment.getCurrency()),
+            payment.getStatus().name(),
+            payment.getCapturedAt()
+        );
+    }
+}</pre>` },
+    { title: `Header and media-type versioning`, body: `<p><b>Custom header:</b> <code>Api-Version: 2</code> keeps URIs stable and version orthogonal to routing. <b>Media-type (content negotiation):</b> <code>Accept: application/vnd.myco.payment.v2+json</code> — the "most RESTful" option, since the URI identifies the resource and the representation is negotiated.</p>
+<p><b>Pros:</b> stable URIs; a resource keeps one address. <b>Cons:</b> the version is invisible in the URL (harder to debug, can't paste in a browser), easy for clients to forget (you need a sensible default), and gateway routing on headers is fiddlier. Media-type versioning is powerful but many client libraries and caches handle custom <code>Accept</code> types poorly.</p>
+<pre>// Header versioning — stable URI, version in Api-Version header
+@RestController
+@RequestMapping("/payments")
+public class PaymentVersionedController {
+
+    private final PaymentService paymentService;
+
+    public PaymentVersionedController(PaymentService paymentService) {
+        this.paymentService = paymentService;
+    }
+
+    @GetMapping(value = "/{id}", headers = "Api-Version=1")
+    public PaymentResponseV1 getPaymentV1(@PathVariable String id) {
+        return toV1(paymentService.findById(id).orElseThrow());
+    }
+
+    @GetMapping(value = "/{id}", headers = "Api-Version=2")
+    public PaymentResponseV2 getPaymentV2(@PathVariable String id) {
+        return toV2(paymentService.findById(id).orElseThrow());
+    }
+
+    // Default when header absent — don't break old clients
+    @GetMapping("/{id}")
+    public PaymentResponseV1 getPaymentDefault(@PathVariable String id) {
+        return toV1(paymentService.findById(id).orElseThrow());
+    }
+}</pre>` },
+    { title: `Decision guide`, body: `<p>Practical guidance:</p>
 <ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
+<li><b>Default to URL path versioning</b> for public APIs and anywhere operability, debuggability, and gateway routing matter most — the cost is theoretical, the benefit is real.</li>
+<li><b>Use header/media-type versioning</b> when you value strict REST semantics, stable URIs, and fine-grained representation negotiation, and your clients/tooling handle it well.</li>
+<li>Version <b>coarsely</b> (a small number of major versions like <code>v1</code>, <code>v2</code>), not per-endpoint or per-field — many concurrent versions is a maintenance tax.</li>
+<li>Whatever you choose: publish a <b>deprecation policy</b> (sunset dates, <code>Deprecation</code>/<code>Sunset</code> headers), keep old versions alive long enough to migrate, and prefer additive changes so you rarely need a new version at all.</li>
 </ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>API Versioning Strategies</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<pre>// Deprecation headers — communicate sunset to clients
+@GetMapping("/{id}")
+public ResponseEntity&lt;PaymentResponseV1&gt; getPaymentV1(@PathVariable String id) {
+    PaymentResponseV1 body = toV1(paymentService.findById(id).orElseThrow());
+    return ResponseEntity.ok()
+        .header("Deprecation", "true")
+        .header("Sunset", "Sat, 01 Jan 2028 00:00:00 GMT")
+        .header("Link", "&lt;https://docs.example.com/migrate-v2&gt;; rel=\"deprecation\"")
+        .body(body);
+}
+
+// Media-type negotiation
+@GetMapping(value = "/{id}",
+    produces = "application/vnd.example.payment.v2+json")
+public PaymentResponseV2 getPaymentV2MediaType(@PathVariable String id) {
+    return toV2(paymentService.findById(id).orElseThrow());
+}</pre>` },
   ],
-  figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="API Versioning Strategies structure">
-<defs><marker id="fig-api-versioning-strategies-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">API Versioning …</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-api-versioning-strategies-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-api-versioning-strategies-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-api-versioning-strategies-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">API Versioning Strategies — class and integration boundaries</text>
-</svg>`, caption: `Structure of the API Versioning Strategies pattern — components and data flow in Order Service.` }
-  ],
-  related: [],
-  
-  
-  template: "tradeoff",
-  sim: () => ({
-    note: `Explore API Versioning Strategies in the payment platform.`,
-    toggleLabel: "Switch approach",
-    labelA: "Without pattern",
-    labelB: "With API Versioning Strategies",
-    sideA: () => ({ nodes: [
-      { title: "Monolith path", active: true },
-      { title: "Tight coupling", value: "risk" },
-      { title: "Scale wall", value: "soon" },
-    ]}),
-    sideB: () => ({ nodes: [
-      { title: "Clear boundary", active: true },
-      { title: "API Versioning Strategies", value: "applied" },
-      { title: "Independent scale", value: "ok" },
-    ]}),
-    status: (ctx, t, useB) => ({ text: useB ? "API Versioning Strategies — better fit" : "naive — hits limits", cls: useB ? "ok" : "warn" }),
-  }),
+  related: ["rest-resource-modeling", "contract-first-vs-code-first", "error-contract-design", "graphql-schema-design", "grpc-service-design"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

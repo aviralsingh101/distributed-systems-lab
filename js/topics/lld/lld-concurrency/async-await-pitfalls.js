@@ -1,7 +1,5 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { flowTemplate } from "../../../sim/templates/index.js";
 
 const topic = makeTopic({
   id: "async-await-pitfalls",
@@ -9,86 +7,104 @@ const topic = makeTopic({
   category: "lld-concurrency",
   track: "lld",
   tier: "essential",
-  archetype: "pattern",
-  oneliner: `Deadlocks, context, and fire-and-forget.`,
+  archetype: "concept",
+  oneliner: `async/await reads like sequential code, which is exactly why its failure modes — blocking the loop, sync-over-async deadlock, and unawaited tasks — are easy to introduce.`,
   sections: [
-    { title: `Motivation`, body: `<p>Deadlocks, context, and fire-and-forget.</p>
-<p>Without <b>Async/Await Pitfalls</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Async/Await Pitfalls</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Async/Await Pitfalls</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Async/Await Pitfalls</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Async/Await Pitfalls</b> changes to production:</p>
+    { title: `How async/await actually works`, body: `<p>To understand the traps, start with how it works. <code>async</code>/<code>await</code> is syntactic sugar over a state machine. When execution hits <code>await</code>, the function <em>suspends</em> and returns control to the event loop (or scheduler); the continuation after the <code>await</code> is scheduled to run when the awaited task completes. Crucially, <b>awaiting does not create a thread and does not run anything in parallel</b> — it yields the current thread so the loop can run other ready work. Most pitfalls come from forgetting that the whole thing usually rides on a small number of threads whose cooperation you must not break.</p>` },
+    { title: `Blocking the loop`, body: `<p>Because the event loop is cooperative, any code that runs without ever awaiting monopolizes the thread. Two ways to block it:</p>
 <ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
+<li><b>CPU-bound work</b> in an async function — a tight loop, JSON parsing of a huge payload, crypto — stalls <em>every</em> other task on that loop until it finishes. Offload it to a worker thread/pool (<code>runInExecutor</code>, a worker thread, <code>Task.Run</code>).</li>
+<li><b>Hidden synchronous IO</b> — calling a blocking file/DB/HTTP API inside async code. It looks innocent but parks the loop thread. Use the non-blocking client instead.</li>
 </ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Async/Await Pitfalls</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<pre>// Java CompletableFuture — blocking JDBC inside async chain
+@Service
+public class AsyncPaymentService {
+    private final ExecutorService cpuPool = Executors.newFixedThreadPool(4);
+    private final WalletRepository wallets;  // blocking JDBC
+
+    public CompletableFuture&lt;PaymentResult&gt; processAsync(PayRequest req) {
+        return CompletableFuture.supplyAsync(() -&gt; {
+            // BAD: blocking call on ForkJoinPool.commonPool()
+            return wallets.findById(req.walletId()).orElseThrow();
+        }, cpuPool);  // GOOD: dedicated pool for blocking IO
+    }
+}
+
+// Spring @Async pitfall — default executor may be too small
+@Async
+public CompletableFuture&lt;Void&gt; notifyWebhook(PaymentCompleted evt) {
+    httpClient.post(evt.callbackUrl(), evt);  // blocks async thread
+    return CompletableFuture.completedFuture(null);
+}</pre>
+<p>Symptom: latency for all requests spikes together whenever one heavy request arrives.</p>
+<pre>// PITFALL: @Async on default pool + blocking Stripe HTTP inside
+@Service
+public class PaymentNotificationService {
+    @Async  // runs on Spring's shared pool (often small)
+    public void sendReceiptEmail(ChargeResult result) {
+        emailClient.send(result);  // blocking SMTP — starves other @Async tasks
+    }
+}
+
+// FIX: dedicated executor + non-blocking client
+@Configuration
+@EnableAsync
+class AsyncConfig {
+    @Bean(name = "notificationExecutor")
+    Executor notificationExecutor() {
+        return Executors.newFixedThreadPool(4);
+    }
+}
+
+@Async("notificationExecutor")
+public void sendReceiptEmail(ChargeResult result) {
+    emailClient.sendAsync(result).join();  // or truly async client
+}</pre>` },
+    { title: `Sync-over-async deadlock`, body: `<p>Blocking a thread to wait for an async result — <code>task.Result</code>, <code>task.get()</code>, <code>runBlocking</code> inside a request — is the classic <b>sync-over-async</b> trap. On runtimes with a captured context or a single-threaded loop it <b>deadlocks</b>: the thread you blocked is the very thread the continuation needs to resume on, so the task can never complete and your wait never returns (the .NET <code>ConfigureAwait(true)</code> UI/ASP.NET deadlock is the textbook case). The rule is "async all the way down": never block on async code; await it. If you truly must bridge, hop to a distinct thread pool that is not the one the continuation will resume on.</p>
+<pre>// DEADLOCK in servlet thread: .get() waits for @Async on same pool
+@RestController
+class PaymentController {
+    @Autowired PaymentService paymentService;
+
+    @PostMapping("/payments")
+    public ChargeResult capture(@RequestBody ChargeRequest req) {
+        return paymentService.captureAsync(req).get(); // blocks servlet thread
+        // @Async continuation may need same pool → deadlock under load
+    }
+}
+
+// FIX: async all the way — return CompletableFuture, or use virtual threads
+@PostMapping("/payments")
+public CompletableFuture&lt;ChargeResult&gt; capture(@RequestBody ChargeRequest req) {
+    return paymentService.captureAsync(req);
+}</pre>` },
+    { title: `Fire-and-forget and lost errors`, body: `<p>Calling an async function without <code>await</code> starts it and drops the returned task on the floor. Two consequences: you have no idea when (or whether) it finished, and any exception it throws becomes an <b>unobserved rejection</b> — silently swallowed, or crashing the process later far from its cause. This is common in "log this in the background" or "kick off a webhook" code. Fixes: keep a reference and <code>await</code> it at a well-defined join point (see structured concurrency), or explicitly attach error handling and hand the work to a supervised background runner. Related traps: <b>sequential awaits</b> where a <code>for</code> loop awaits each call one at a time instead of starting them together and awaiting the group (an N× latency N+1 problem), and mixing parallel writes to shared state under the assumption that "single-threaded" means "no interleaving" — it does interleave, at every <code>await</code> point.</p>
+<pre>// FIRE-AND-FORGET: webhook delivery errors vanish
+@Async
+public void notifyMerchant(ChargeResult result) {
+    webhookClient.post(result);  // exception → unobserved, merchant never notified
+}
+
+// FIX: attach error handler + structured join at request boundary
+public CompletableFuture&lt;Void&gt; notifyMerchant(ChargeResult result) {
+    return CompletableFuture.runAsync(() -&gt; webhookClient.post(result))
+        .exceptionally(ex -&gt; {
+            deadLetterQueue.enqueue(result, ex);
+            return null;
+        });
+}
+
+// SEQUENTIAL AWAITS: N payments × 200ms = N×200ms latency
+for (ChargeRequest req : batch) {
+    results.add(paymentService.captureAsync(req).join());
+}
+// PARALLEL: ~200ms total for the batch
+List&lt;CompletableFuture&lt;ChargeResult&gt;&gt; futures = batch.stream()
+    .map(paymentService::captureAsync).toList();
+CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).join();</pre>` },
   ],
-  figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Async/Await Pitfalls structure">
-<defs><marker id="fig-async-await-pitfalls-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Async/Await Pit…</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-async-await-pitfalls-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-async-await-pitfalls-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-async-await-pitfalls-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Async/Await Pitfalls — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Async/Await Pitfalls pattern — components and data flow in Order Service.` }
-  ],
-  related: [],
-  
-  
-  template: "flow",
-  sim: () => ({
-    note: `Explore Async/Await Pitfalls in the payment platform.`,
-    toggles: [{ key: "fix", label: "Apply Async/Await Pitfalls", kind: "ok", value: false }],
-    scenario(ctx) {
-      const fix = ctx.toggles.fix;
-      const actors = [
-        { id: "client", label: "Client", color: C.client },
-        { id: "order", label: "Order Service", color: C.service },
-        { id: "ledger", label: "Ledger", color: C.ledger, kind: "db", value: "balance" },
-        { id: "queue", label: "Event Queue", color: C.queue },
-      ];
-      const steps = fix ? [
-        { from: "client", to: "order", label: "pay", good: true },
-        { from: "order", to: "ledger", label: "Async/Await Pitfalls ✓", good: true, set: { ledger: "committed" } },
-        { from: "ledger", to: "queue", label: "event", good: true },
-      ] : [
-        { from: "client", to: "order", label: "pay" },
-        { from: "order", to: "ledger", label: "naive write", bad: true, set: { ledger: "risk" } },
-        { from: "order", to: "queue", label: "dual write?", dashed: true, bad: true },
-      ];
-      return {
-        actors, steps, stepDur: 1.2,
-        status: (r) => !r.done ? { text: "processing…", cls: "" }
-          : fix ? { text: "Async/Await Pitfalls applied", cls: "ok" } : { text: "pattern missing", cls: "err" },
-      };
-    },
-  }),
+  related: ["threads-vs-async", "structured-concurrency", "thread-pool", "virtual-threads"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

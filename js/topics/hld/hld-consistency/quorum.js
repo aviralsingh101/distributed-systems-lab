@@ -1,6 +1,7 @@
 // @article-v2
-import { mountSimulation } from "../../../sim/controls.js";
+// @sim-lab
 import { C } from "../../../sim/primitives.js";
+import { createTopicSim } from "../../../sim/lab/registry.js";
 
 export const meta = { id: "quorum", title: "Quorum", category: "consistency" };
 
@@ -33,70 +34,11 @@ export const content = {
 <p>Interview tip: whiteboard the charge flow, mark where <b>Quorum</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
   ],
   figures: [
-    { id: "request-path", svg: `<svg viewBox="0 0 640 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Quorum in request path">
-<defs><marker id="fig-quorum-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="10" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="46" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Client</text>
-<rect x="100" y="40" width="88" height="36" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="144" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Quorum</text><text x="144" y="72" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">this topic</text>
-<rect x="206" y="40" width="80" height="36" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
-<text x="246" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Order</text>
-<rect x="304" y="40" width="84" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="346" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Gateway</text>
-<rect x="406" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="442" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger</text>
-<rect x="496" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="532" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Queue</text>
-<line x1="82" y1="58" x2="98" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-quorum-arr)"/>
-<line x1="188" y1="58" x2="204" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-quorum-arr)"/>
-<line x1="286" y1="58" x2="302" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-quorum-arr)"/>
-<line x1="388" y1="58" x2="404" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-quorum-arr)"/>
-<line x1="478" y1="58" x2="494" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-quorum-arr)"/>
-<text x="320" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">HTTPS request flow — Quorum</text>
-</svg>`, caption: `Quorum on the payment request path — from client charge to Ledger commit.` },
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Quorum structure">
-<defs><marker id="fig-quorum-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Quorum</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-quorum-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-quorum-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-quorum-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Quorum — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Quorum pattern — components and data flow in Order Service.` }
+    { id: "quorum", svg: `<svg viewBox="0 0 480 170" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Quorum quorum"> <defs><marker id="fig-quorum-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs> <circle cx="240" cy="95" r="62" fill="none" stroke="#93a1bd" stroke-width="1.5" stroke-dasharray="4 3"/> <rect x="216" y="17" width="48" height="32" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/> <text x="240" y="27" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">R1</text><text x="240" y="43" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">W</text> <rect x="274.9655040102995" y="59.84094634875326" width="48" height="32" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/> <text x="298.9655040102995" y="69.84094634875326" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">R2</text><text x="298.9655040102995" y="85.84094634875326" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">W</text> <rect x="252.4426856421333" y="129.15905365124675" width="48" height="32" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/> <text x="276.4426856421333" y="139.15905365124675" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">R3</text><text x="276.4426856421333" y="155.15905365124675" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">W+R</text> <rect x="179.5573143578667" y="129.15905365124675" width="48" height="32" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/> <text x="203.5573143578667" y="139.15905365124675" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">R4</text><text x="203.5573143578667" y="155.15905365124675" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">R</text> <rect x="157.03449598970047" y="59.84094634875325" width="48" height="32" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/> <text x="181.03449598970047" y="69.84094634875325" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">R5</text><text x="181.03449598970047" y="85.84094634875325" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">R</text> <rect x="390" y="55" width="72" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/> <text x="426" y="69" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Client</text><text x="426" y="85" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">R=3</text> <line x1="390" y1="75" x2="276.4426856421333" y2="145.15905365124675" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-quorum-arr)"/> <text x="240" y="18" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">N=5, W=3, R=3 → R+W &gt; N overlap</text> </svg>`, caption: `Quorum: N=5 replicas on a ring — W=3 write quorum and R=3 read quorum overlap at R3 so reads see the latest write.` },
   ],
   related: [],
 };
 
 export function createSimulation(stage, panel, stageEl) {
-  return mountSimulation(stage, panel, stageEl, {
-    note: "Green = write set (W). Blue ring = read set (R). Overlap = fresh.",
-    params: [
-      { key: "N", label: "Replicas N", min: 3, max: 7, step: 1, value: 5, live: true },
-      { key: "W", label: "Write quorum W", min: 1, max: 7, step: 1, value: 3, live: true },
-      { key: "R", label: "Read quorum R", min: 1, max: 7, step: 1, value: 3, live: true },
-    ],
-    frame(ctx) {
-      const d = ctx.d; const N = ctx.params.N; const W = Math.min(ctx.params.W, N); const R = Math.min(ctx.params.R, N);
-      const guaranteed = R + W > N;
-      const x0 = 500 - (N - 1) * 60, y = 220;
-      for (let i = 0; i < N; i++) {
-        const x = x0 + i * 120;
-        const inW = i < W;              // write set = first W
-        const inR = i >= N - R;         // read set = last R
-        const overlap = inW && inR;
-        d.node(x - 50, y - 30, 100, 60, { title: "r" + i, color: inW ? C.ledger : C.gateway, state: inW ? "ok" : "dim", value: overlap ? "★" : "" });
-        if (inR) { d.ctx.save(); d.ctx.strokeStyle = C.accent; d.ctx.lineWidth = 3; d._rr(x - 58, y - 38, 116, 76, 14); d.ctx.stroke(); d.ctx.restore(); }
-      }
-      d.text(500, 120, `R + W = ${R + W}  ${guaranteed ? ">" : "≤"}  N = ${N}`, { size: 18, align: "center", weight: 700, color: guaranteed ? C.ok : C.err });
-      d.text(500, y + 90, "green = wrote latest · blue ring = read set", { size: 12, align: "center", color: C.muted });
-      d.badge(500, 420, guaranteed ? "R+W>N — read always sees latest write" : "R+W≤N — read may miss the latest write", { color: guaranteed ? C.ok : C.err, align: "center" });
-      ctx.setStatus(guaranteed ? "strongly consistent (quorum overlap)" : "no overlap — stale reads possible", guaranteed ? "ok" : "err");
-    },
-  });
+  return createTopicSim("quorum", stage, panel, stageEl);
 }

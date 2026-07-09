@@ -51,12 +51,15 @@ export function makeTopic(cfg) {
   };
 
   function createSimulation(stage, panel, stageEl) {
+    if (cfg.sim == null || cfg.sim === undefined) return null;
     const tmpl = TEMPLATES[cfg.template] || topologyTemplate;
     const simCfg = typeof cfg.sim === "function" ? cfg.sim : () => cfg.sim;
     return tmpl(stage, panel, stageEl, simCfg());
   }
 
-  return { meta, content, createSimulation };
+  const result = { meta, content };
+  if (cfg.sim != null) result.createSimulation = createSimulation;
+  return result;
 }
 
 /** Default payment-platform flow for quick topic authoring. */

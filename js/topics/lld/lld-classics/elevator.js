@@ -1,7 +1,24 @@
 // @article-v2
+// @sim-lab
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { stateMachineTemplate } from "../../../sim/templates/index.js";
+import { createTopicSim } from "../../../sim/lab/registry.js";
+
+const STATE_SVG = `<svg viewBox="0 0 560 170" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Elevator direction state machine">
+  <defs><marker id="fig-elevator-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#93a1bd"/></marker></defs>
+  <ellipse cx="280" cy="85" rx="70" ry="34" fill="#1a2236" stroke="#93a1bd" stroke-width="1.5"/>
+  <text x="280" y="89" text-anchor="middle" fill="#cdd6e8" font-size="12" font-family="system-ui">IDLE</text>
+  <ellipse cx="90" cy="85" rx="70" ry="34" fill="#1a2236" stroke="#3ddc97" stroke-width="1.6"/>
+  <text x="90" y="82" text-anchor="middle" fill="#cdd6e8" font-size="12" font-family="system-ui">MOVING_UP</text>
+  <text x="90" y="98" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">serve up-set</text>
+  <ellipse cx="470" cy="85" rx="70" ry="34" fill="#1a2236" stroke="#ff8fab" stroke-width="1.6"/>
+  <text x="470" y="82" text-anchor="middle" fill="#cdd6e8" font-size="12" font-family="system-ui">MOVING_DOWN</text>
+  <text x="470" y="98" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">serve down-set</text>
+  <line x1="212" y1="75" x2="160" y2="80" stroke="#93a1bd" stroke-width="1.4" marker-end="url(#fig-elevator-arr)"/>
+  <line x1="160" y1="98" x2="212" y2="95" stroke="#93a1bd" stroke-width="1.4" marker-end="url(#fig-elevator-arr)"/>
+  <line x1="348" y1="95" x2="400" y2="98" stroke="#93a1bd" stroke-width="1.4" marker-end="url(#fig-elevator-arr)"/>
+  <line x1="400" y1="80" x2="348" y2="75" stroke="#93a1bd" stroke-width="1.4" marker-end="url(#fig-elevator-arr)"/>
+  <text x="280" y="150" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">keep current direction until its request set empties (SCAN / LOOK)</text>
+</svg>`;
 
 const topic = makeTopic({
   id: "elevator",
@@ -9,75 +26,126 @@ const topic = makeTopic({
   category: "lld-classics",
   track: "lld",
   tier: "essential",
-  archetype: "pattern",
-  oneliner: `Scheduling and direction logic.`,
-  sections: [
-    { title: `Motivation`, body: `<p>Scheduling and direction logic.</p>
-<p>Without <b>Elevator</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Elevator</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Elevator</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Elevator</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Elevator</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Elevator</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
-  ],
+  archetype: "classic",
+  oneliner: `Model cars, floor requests, and a scheduler that sweeps in one direction (SCAN/LOOK) instead of naively serving requests first-come-first-served.`,
   figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Elevator structure">
-<defs><marker id="fig-elevator-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Elevator</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-elevator-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-elevator-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-elevator-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Elevator — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Elevator pattern — components and data flow in Order Service.` }
+    { id: "elevator-states", svg: STATE_SVG, caption: "Each car is a small state machine: it commits to a direction and services every request in that direction before reversing." },
   ],
-  related: [],
-  
-  
-  template: "stateMachine",
-  sim: () => ({
-    note: `Explore Elevator in the payment platform.`,
-    toggles: [{ key: "fix", label: "Valid transitions only", kind: "ok", value: false }],
-    states: (ctx) => [
-      { id: "pending", label: "Pending", x: 200, y: 280, color: C.service },
-      { id: "active", label: "Elevator", x: 500, y: 280, color: C.accent, good: true },
-      { id: "done", label: "Settled", x: 800, y: 280, color: C.ok, good: true },
-      { id: "bad", label: "Invalid", x: 500, y: 420, color: C.err, bad: true },
-    ],
-    currentState: (ctx, t) => {
-      if (!ctx.toggles.fix && (t % 6) > 4) return "bad";
-      return ["pending", "active", "done"][Math.floor((t * 0.35) % 3)];
-    },
-    transitions: [{ from: "pending", to: "active", label: "apply" }, { from: "active", to: "done", label: "commit" }],
-    status: (ctx) => ({ text: ctx.toggles.fix ? "state machine guards flow" : "illegal states possible", cls: ctx.toggles.fix ? "ok" : "err" }),
-  }),
+  sections: [
+    { title: `Requirements and the two request types`, body: `<p>Design a controller for one or more elevator cars in an N-floor building. The subtlety most candidates miss is that there are <b>two kinds of request</b>: <b>hall calls</b> (a person on floor 7 presses "up") which carry a <em>direction</em>, and <b>car calls</b> (a rider inside presses "3") which carry only a <em>target floor</em>. A good design treats them differently, because a hall call for "up" should be served by a car already travelling up, not one heading down.</p>` },
+    { title: `The scheduling algorithm`, body: `<p>Serving requests first-come-first-served makes the car yo-yo and starves riders. The standard answer is the <b>elevator algorithm (SCAN / LOOK)</b>, the same idea as a disk-head scheduler: keep moving in the current direction, stopping at every requested floor along the way, and only reverse when there are no more requests ahead in that direction.</p>
+<p>Implement it with two sorted sets per car: an <code>upSet</code> (floors to visit while going up) and a <code>downSet</code>. While <code>MOVING_UP</code>, pop the next floor above current from <code>upSet</code>; when it empties, switch to <code>MOVING_DOWN</code> and drain <code>downSet</code>. A new request is inserted into the set matching its direction relative to the car's position, so it is picked up naturally on the current or return sweep.</p>` },
+    { title: `The class model`, figureAfter: "elevator-states", body: `<p>Separate the mechanical car from the dispatch policy so the scheduling strategy is swappable:</p>
+<pre>public enum Direction { UP, DOWN, IDLE }
+
+public final class ElevatorRequest {
+    private final int floor;
+    private final Direction hallDirection;  // null for in-car button presses
+
+    public ElevatorRequest(int floor, Direction hallDirection) {
+        this.floor = floor;
+        this.hallDirection = hallDirection;
+    }
+
+    public int floor() { return floor; }
+    public Optional&lt;Direction&gt; hallDirection() {
+        return Optional.ofNullable(hallDirection);
+    }
+    public boolean isHallCall() { return hallDirection != null; }
+}</pre>
+<pre>public final class ElevatorCar {
+    private int currentFloor;
+    private Direction direction = Direction.IDLE;
+    private final TreeSet&lt;Integer&gt; upTargets = new TreeSet&lt;&gt;();
+    private final TreeSet&lt;Integer&gt; downTargets = new TreeSet&lt;&gt;(Collections.reverseOrder());
+
+    public void addRequest(ElevatorRequest request) {
+        int floor = request.floor();
+        if (request.isHallCall()) {
+            if (request.hallDirection().get() == Direction.UP) upTargets.add(floor);
+            else downTargets.add(floor);
+        } else {
+            if (floor &gt; currentFloor) upTargets.add(floor);
+            else if (floor &lt; currentFloor) downTargets.add(floor);
+            else openDoors();
+        }
+        if (direction == Direction.IDLE) {
+            direction = floor &gt;= currentFloor ? Direction.UP : Direction.DOWN;
+        }
+    }
+
+    public void step() {
+        if (direction == Direction.UP) {
+            if (upTargets.isEmpty()) {
+                direction = downTargets.isEmpty() ? Direction.IDLE : Direction.DOWN;
+            } else {
+                int next = upTargets.higher(currentFloor);
+                if (next == -1) { direction = Direction.DOWN; return; }
+                moveTo(next);
+            }
+        } else if (direction == Direction.DOWN) {
+            if (downTargets.isEmpty()) {
+                direction = upTargets.isEmpty() ? Direction.IDLE : Direction.UP;
+            } else {
+                int next = downTargets.lower(currentFloor);
+                if (next == -1) { direction = Direction.UP; return; }
+                moveTo(next);
+            }
+        }
+    }
+
+    private void moveTo(int floor) {
+        currentFloor = floor;
+        upTargets.remove(floor);
+        downTargets.remove(floor);
+        openDoors();
+    }
+
+    private void openDoors() { /* unload/load passengers */ }
+
+    public int currentFloor() { return currentFloor; }
+    public Direction direction() { return direction; }
+}</pre>` },
+    { title: `Dispatcher and edge cases`, body: `<p>The <b>dispatcher</b> for a multi-car bank assigns hall calls to the car that is closest and already moving toward it:</p>
+<pre>public final class ElevatorSystem {
+    private final List&lt;ElevatorCar&gt; cars;
+
+    public ElevatorSystem(int carCount) {
+        this.cars = IntStream.range(0, carCount)
+            .mapToObj(i -&gt; new ElevatorCar())
+            .toList();
+    }
+
+    public void requestHall(int floor, Direction direction) {
+        ElevatorCar best = cars.stream()
+            .min(Comparator.comparingInt(c -&gt; cost(c, floor, direction)))
+            .orElseThrow();
+        best.addRequest(new ElevatorRequest(floor, direction));
+    }
+
+    public void requestCar(int carIndex, int floor) {
+        cars.get(carIndex).addRequest(new ElevatorRequest(floor, null));
+    }
+
+    public void tick() {
+        cars.forEach(ElevatorCar::step);
+    }
+
+    private int cost(ElevatorCar car, int floor, Direction dir) {
+        int distance = Math.abs(car.currentFloor() - floor);
+        if (car.direction() == Direction.IDLE) return distance;
+        if (car.direction() == dir) return distance;
+        return distance + 100;  // penalty for wrong-direction car
+    }
+}</pre>
+<p>Handle the details interviewers probe: an idle car should adopt the direction of the first new request; requests for the current floor open the doors immediately; capacity/weight limits let a full car skip hall calls; and door-open, door-close, and emergency-stop are extra states on the car's machine. Keep the car's motion logic, the request-set bookkeeping, and the dispatch policy in separate objects so each can be tested and tuned on its own.</p>` },
+  ],
+  related: ["parking-lot", "state", "strategy"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
+
 export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
+  return createTopicSim("elevator", stage, panel, stageEl);
 }

@@ -1,7 +1,22 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { layerTemplate } from "../../../sim/templates/index.js";
+
+const SCOPE_SVG = `<svg viewBox="0 0 540 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Module pattern closure scope">
+  <defs><marker id="fig-module-pattern-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
+  <rect x="20" y="20" width="250" height="160" rx="8" fill="#141b2c" stroke="#7c5cff" stroke-width="1.5"/>
+  <text x="145" y="40" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">closure scope (IIFE)</text>
+  <rect x="40" y="54" width="210" height="34" rx="5" fill="#1a2236" stroke="#ff6b6b" stroke-width="1.2"/>
+  <text x="52" y="75" fill="#cdd6e8" font-size="9" font-family="ui-monospace,monospace">const balances = new Map()</text>
+  <text x="145" y="104" text-anchor="middle" fill="#93a1bd" font-size="8" font-family="system-ui">private — unreachable from outside</text>
+  <rect x="40" y="118" width="210" height="46" rx="5" fill="#1a2236" stroke="#3ddc97" stroke-width="1.2"/>
+  <text x="52" y="136" fill="#cdd6e8" font-size="9" font-family="ui-monospace,monospace">return { debit, credit,</text>
+  <text x="52" y="151" fill="#cdd6e8" font-size="9" font-family="ui-monospace,monospace">         balanceOf }</text>
+  <rect x="360" y="86" width="160" height="52" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
+  <text x="440" y="108" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">caller</text>
+  <text x="440" y="124" text-anchor="middle" fill="#93a1bd" font-size="8" font-family="ui-monospace,monospace">wallet.debit(id, 100)</text>
+  <line x1="250" y1="140" x2="358" y2="112" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-module-pattern-arr)"/>
+  <text x="300" y="160" text-anchor="middle" fill="#93a1bd" font-size="8" font-family="system-ui">only the returned API escapes</text>
+</svg>`;
 
 const topic = makeTopic({
   id: "module-pattern",
@@ -10,68 +25,79 @@ const topic = makeTopic({
   track: "lld",
   tier: "hidden-gem",
   archetype: "pattern",
-  oneliner: `Encapsulate private state in closure.`,
+  oneliner: `Use a function's closure to hide private state and expose only a curated public API — JavaScript's original way to get encapsulation.`,
   sections: [
-    { title: `Motivation`, body: `<p>Encapsulate private state in closure.</p>
-<p>Without <b>Module Pattern</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Module Pattern</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Module Pattern</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Module Pattern</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Module Pattern</b> changes to production:</p>
+    { title: `Intent and origin`, body: `<p>The <b>Module Pattern</b> uses a function scope to encapsulate private state and expose a deliberately small public interface. Variables declared inside the function are captured by <b>closure</b> and are unreachable from outside; only the object the function returns can be touched by callers.</p>
+<p>It predates ES modules and class private fields. Before JavaScript had any real access modifiers, this was <em>the</em> idiom for information hiding — everything on an object was public, so developers used closures to make "private" mean "not in the returned object".</p>
+<p>In Java, the equivalent is a <b>package-private class</b> with a <b>static factory</b> that returns a narrow public interface — private state stays inside the module, only the curated API escapes.</p>
+<pre>// --- Public API: what callers see ---
+public interface WalletStore {
+    void debit(String walletId, long amountMinor);
+    void credit(String walletId, long amountMinor);
+    long balanceOf(String walletId);
+}</pre>` },
+    { title: `Structure`, figureAfter: "module-pattern-scope", body: `<p>The classic JavaScript form is an immediately-invoked function expression (IIFE) that returns an object of public methods. In Java, the same structure maps to a factory method on a holder class:</p>
 <ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
+<li>Private bindings — the balance map, invisible outside the module.</li>
+<li>Inner functions — close over private state and enforce invariants.</li>
+<li>Returned public API — only <code>debit</code>, <code>credit</code>, <code>balanceOf</code> escape.</li>
 </ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Module Pattern</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<pre>// --- Module implementation: private state + public factory ---
+public final class WalletStoreModule {
+    // Private — like the IIFE's closure scope
+    private final Map&lt;String, Long&gt; balances = new HashMap&lt;&gt;();
+
+    private WalletStoreModule() {}  // no direct construction
+
+    public static WalletStore create() {
+        WalletStoreModule module = new WalletStoreModule();
+        return new WalletStore() {
+            @Override
+            public void debit(String walletId, long amountMinor) {
+                long current = module.balances.getOrDefault(walletId, 0L);
+                if (current &lt; amountMinor) {
+                    throw new InsufficientFundsException(walletId);
+                }
+                module.balances.put(walletId, current - amountMinor);
+            }
+
+            @Override
+            public void credit(String walletId, long amountMinor) {
+                module.balances.merge(walletId, amountMinor, Long::sum);
+            }
+
+            @Override
+            public long balanceOf(String walletId) {
+                return module.balances.getOrDefault(walletId, 0L);
+            }
+        };
+    }
+}</pre>
+<p>A common variant, the <b>revealing module pattern</b>, defines every function as a local and returns an object that simply maps public names to them, keeping the public/private split in one readable place.</p>` },
+    { title: `Implementation flow`, body: `<p>A wallet store keeps its balance map private so no caller can corrupt it:</p>
+<ol>
+<li>The factory runs once: <code>WalletStore wallet = WalletStoreModule.create()</code>.</li>
+<li>It defines <code>debit</code>, <code>credit</code>, and <code>balanceOf</code>, each of which validates the invariant (never let a balance go negative) before mutating the map.</li>
+<li>Only the returned <code>WalletStore</code> interface escapes; the <code>balances</code> map itself is unreachable.</li>
+</ol>
+<pre>// --- Caller: uses only the public API ---
+public class PaymentService {
+    private final WalletStore wallet = WalletStoreModule.create();
+
+    public void chargeWallet(String walletId, long amountMinor) {
+        wallet.debit(walletId, amountMinor);
+        // wallet.balances — compile error; map is private to the module
+    }
+}</pre>
+<p>Callers can move money only through the vetted methods — there is no handle to reach in and set a balance directly, so the invariant holds by construction.</p>` },
+    { title: `Trade-offs and the modern replacement`, body: `<p>The pattern gives genuinely private state and a clean public surface, and the returned object behaves like a singleton for that module. The costs: private internals are hard to unit-test in isolation, closures retain memory for the module's lifetime, and you get a single instance unless you wrap it in a factory that returns a fresh object per call.</p>
+<p>Today, <b>ES modules</b> provide file-level encapsulation (only <code>export</code>ed names escape) and <b>class <code>#private</code> fields</b> give per-instance privacy with normal testing ergonomics. In Java, <code>private</code> fields on a class plus a public interface achieve the same goal with better tooling support.</p>` },
   ],
   figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Module Pattern structure">
-<defs><marker id="fig-module-pattern-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Module Pattern</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-module-pattern-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-module-pattern-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-module-pattern-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Module Pattern — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Module Pattern pattern — components and data flow in Order Service.` }
+    { id: "module-pattern-scope", svg: SCOPE_SVG, caption: "Private state lives in the closure; only the returned methods are reachable, so callers must go through the vetted API." },
   ],
-  related: [],
-  
-  
-  template: "layer",
-  sim: () => ({
-    note: `Explore Module Pattern in the payment platform.`,
-    toggles: [{ key: "fix", label: "Apply layering", kind: "ok", value: false }],
-    layers: (ctx) => [
-      { name: "API", components: [{ title: "REST/gRPC", active: true }] },
-      { name: "Domain", components: [{ title: "Module Pattern", active: ctx.toggles.fix, color: C.accent }] },
-      { name: "Data", components: [{ title: "Ledger", color: C.ledger }, { title: "Queue", color: C.queue }] },
-    ],
-    status: (ctx) => ({ text: ctx.toggles.fix ? "clean separation" : "logic leaks across layers", cls: ctx.toggles.fix ? "ok" : "err" }),
-  }),
+  related: ["singleton", "encapsulation", "facade", "value-objects"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

@@ -1,7 +1,22 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { flowTemplate } from "../../../sim/templates/index.js";
+
+const PACT_SVG = `<svg viewBox="0 0 620 150" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Consumer-driven contract flow">
+  <defs><marker id="fig-consumer-driven-contracts-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
+  <rect x="20" y="55" width="130" height="46" rx="8" fill="#1a2236" stroke="#5b9dff" stroke-width="1.6"/>
+  <text x="85" y="75" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Consumer</text>
+  <text x="85" y="91" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">Order Service</text>
+  <rect x="245" y="55" width="130" height="46" rx="8" fill="#1a2236" stroke="#7c5cff" stroke-width="1.6"/>
+  <text x="310" y="75" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Pact broker</text>
+  <text x="310" y="91" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">stores contract</text>
+  <rect x="470" y="55" width="130" height="46" rx="8" fill="#1a2236" stroke="#3ddc97" stroke-width="1.6"/>
+  <text x="535" y="75" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Provider</text>
+  <text x="535" y="91" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">Wallet Service</text>
+  <line x1="150" y1="70" x2="243" y2="70" stroke="#5b9dff" stroke-width="1.4" marker-end="url(#fig-consumer-driven-contracts-arr)"/>
+  <text x="196" y="60" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">publish pact</text>
+  <line x1="470" y1="86" x2="377" y2="86" stroke="#3ddc97" stroke-width="1.4" marker-end="url(#fig-consumer-driven-contracts-arr)"/>
+  <text x="423" y="118" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">verify against real handler</text>
+</svg>`;
 
 const topic = makeTopic({
   id: "consumer-driven-contracts",
@@ -10,85 +25,100 @@ const topic = makeTopic({
   track: "lld",
   tier: "essential",
   archetype: "pattern",
-  oneliner: `Pact-style API agreements.`,
-  sections: [
-    { title: `Motivation`, body: `<p>Pact-style API agreements.</p>
-<p>Without <b>Consumer-Driven Contracts</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Consumer-Driven Contracts</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Consumer-Driven Contracts</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Consumer-Driven Contracts</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Consumer-Driven Contracts</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Consumer-Driven Contracts</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
-  ],
+  oneliner: `Consumers record exactly the requests and responses they depend on; providers verify those expectations in their own build — catching breaking changes without a shared environment.`,
   figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Consumer-Driven Contracts structure">
-<defs><marker id="fig-consumer-driven-contracts-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Consumer-Driven…</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-consumer-driven-contracts-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-consumer-driven-contracts-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-consumer-driven-contracts-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Consumer-Driven Contracts — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Consumer-Driven Contracts pattern — components and data flow in Order Service.` }
+    { id: "pact-flow", svg: PACT_SVG, caption: "The consumer generates a pact and publishes it; the provider replays it against its real handler during its own build." },
   ],
-  related: [],
-  
-  
-  template: "flow",
-  sim: () => ({
-    note: `Explore Consumer-Driven Contracts in the payment platform.`,
-    toggles: [{ key: "fix", label: "Apply Consumer-Driven Contracts", kind: "ok", value: false }],
-    scenario(ctx) {
-      const fix = ctx.toggles.fix;
-      const actors = [
-        { id: "client", label: "Client", color: C.client },
-        { id: "order", label: "Order Service", color: C.service },
-        { id: "ledger", label: "Ledger", color: C.ledger, kind: "db", value: "balance" },
-        { id: "queue", label: "Event Queue", color: C.queue },
-      ];
-      const steps = fix ? [
-        { from: "client", to: "order", label: "pay", good: true },
-        { from: "order", to: "ledger", label: "Consumer-Driven Contracts ✓", good: true, set: { ledger: "committed" } },
-        { from: "ledger", to: "queue", label: "event", good: true },
-      ] : [
-        { from: "client", to: "order", label: "pay" },
-        { from: "order", to: "ledger", label: "naive write", bad: true, set: { ledger: "risk" } },
-        { from: "order", to: "queue", label: "dual write?", dashed: true, bad: true },
-      ];
-      return {
-        actors, steps, stepDur: 1.2,
-        status: (r) => !r.done ? { text: "processing…", cls: "" }
-          : fix ? { text: "Consumer-Driven Contracts applied", cls: "ok" } : { text: "pattern missing", cls: "err" },
-      };
-    },
-  }),
+  sections: [
+    { title: `The integration-test problem it solves`, body: `<p>When Order Service calls Wallet Service over HTTP, how do you know a Wallet deploy will not break Order? Spinning up both services in one end-to-end environment is slow, flaky, and scales badly as services multiply. <b>Consumer-Driven Contracts (CDC)</b>, popularized by <b>Pact</b>, replace that with two independent tests that share a recorded <em>contract</em> — so neither side needs the other running to be verified.</p>
+<p>The name captures the key inversion: the <b>consumer</b> defines the contract. It declares only the fields and responses it actually uses, so providers are free to add anything else without breaking anyone.</p>` },
+    { title: `Structure and flow`, figureAfter: "pact-flow", body: `<p>The workflow has two halves connected by a stored artifact (the <em>pact</em>):</p>
+<ol>
+<li><b>Consumer side.</b> In the consumer's unit test, a mock provider stands in for Wallet. The test says "given a wallet with balance 500, when I <code>GET /wallets/42</code>, expect 200 with <code>{balance: 500}</code>." Running it both tests the consumer against that stub <em>and</em> records the interaction as a pact file.</li>
+<li><b>Publish.</b> The pact is uploaded to a <b>Pact broker</b>, versioned by consumer and git commit.</li>
+<li><b>Provider side.</b> Wallet's build fetches the pact and <b>replays each recorded request against its real handler</b>, asserting the real response matches what the consumer expects. If Wallet renamed <code>balance</code> to <code>amount</code>, its own build goes red.</li>
+</ol>
+<p>Because verification runs inside each service's pipeline, a provider learns it broke a consumer <em>before</em> deploying — with <code>can-i-deploy</code> gating the release on all consumer pacts passing.</p>` },
+    { title: `Pact consumer test in Java`, body: `<p>Order Service needs the wallet balance before placing a charge. The consumer test exercises <code>OrderService</code> against a Pact mock server and records the interaction:</p>
+<pre>import au.com.dius.pact.consumer.MockServer;
+import au.com.dius.pact.consumer.dsl.PactDslWithProvider;
+import au.com.dius.pact.consumer.junit5.PactConsumerTestExt;
+import au.com.dius.pact.consumer.junit5.PactTestFor;
+import au.com.dius.pact.core.model.RequestResponsePact;
+import au.com.dius.pact.core.model.annotations.Pact;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+@ExtendWith(PactConsumerTestExt.class)
+class WalletClientPactTest {
+
+    @Pact(consumer = "order-service", provider = "wallet-service")
+    RequestResponsePact getWalletBalance(PactDslWithProvider builder) {
+        return builder
+            .given("wallet 42 exists with balance 50000")
+            .uponReceiving("a request for wallet balance before charge")
+                .path("/wallets/42")
+                .method("GET")
+            .willRespondWith()
+                .status(200)
+                .body("{\"walletId\":\"42\",\"balanceCents\":50000,\"currency\":\"USD\"}")
+            .toPact();
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "getWalletBalance")
+    void orderService_readsBalanceFromWallet(MockServer mockServer) {
+        WalletClient client = new WalletClient(mockServer.getUrl());
+        WalletBalance balance = client.getBalance("42");
+
+        assertEquals(50000L, balance.balanceCents());
+        assertEquals("USD", balance.currency());
+    }
+}</pre>
+<p>The test proves Order Service parses the response correctly <em>and</em> writes a pact JSON file describing exactly what it needs from Wallet.</p>` },
+    { title: `Provider verification and what CDC is not`, body: `<p>On the Wallet Service side, the provider test replays the pact against the real Spring controller — no mock, no stub:</p>
+<pre>import au.com.dius.pact.provider.junit5.HttpTestTarget;
+import au.com.dius.pact.provider.junit5.PactVerificationContext;
+import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvider;
+import au.com.dius.pact.provider.junitsupport.Provider;
+import au.com.dius.pact.provider.junitsupport.State;
+import au.com.dius.pact.provider.junitsupport.loader.PactBroker;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.TestTemplate;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.server.LocalServerPort;
+
+@Provider("wallet-service")
+@PactBroker(url = "https://pact-broker.internal")
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@ExtendWith(PactVerificationInvocationContextProvider.class)
+class WalletProviderPactTest {
+
+    @LocalServerPort int port;
+
+    @BeforeEach
+    void setTarget(PactVerificationContext context) {
+        context.setTarget(new HttpTestTarget("localhost", port));
+    }
+
+    @State("wallet 42 exists with balance 50000")
+    void seedWallet() {
+        walletRepository.save(new Wallet("42", 50000L, "USD"));
+    }
+
+    @TestTemplate
+    void verifyPactAgainstRealHandler(PactVerificationContext context) {
+        context.verifyInteraction();
+    }
+}</pre>
+<p>CDC verifies the <b>shape and semantics of the interaction</b> — endpoints, fields, status codes, and provider states ("given a wallet exists"). It does <em>not</em> test business correctness end to end; a pact can pass while both sides agree on a wrong behaviour. Treat it as protection against accidental breaking changes, not as a substitute for the provider's own domain tests.</p>
+<p>Use CDC for internal service-to-service calls where you control both sides. For third-party APIs you cannot influence, or public APIs with many unknown consumers, CDC fits poorly — there you rely on versioning and schema tests instead. Keep contracts lean: only assert on fields the consumer truly reads, or you re-create the brittleness CDC was meant to remove.</p>` },
+  ],
+  related: ["unit-integration-contract", "api-versioning-strategies", "contract-first-vs-code-first"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

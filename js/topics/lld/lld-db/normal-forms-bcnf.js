@@ -1,7 +1,5 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { dataModelTemplate } from "../../../sim/templates/index.js";
 
 const topic = makeTopic({
   id: "normal-forms-bcnf",
@@ -9,72 +7,149 @@ const topic = makeTopic({
   category: "lld-db",
   track: "lld",
   tier: "essential",
-  archetype: "pattern",
-  oneliner: `Reduce redundancy systematically.`,
+  archetype: "concept",
+  oneliner: `A ladder of guarantees about functional dependencies that removes update, insert, and delete anomalies from a relational schema.`,
   sections: [
-    { title: `Motivation`, body: `<p>Reduce redundancy systematically.</p>
-<p>Without <b>1NF–3NF / BCNF</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>1NF–3NF / BCNF</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>1NF–3NF / BCNF</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>1NF–3NF / BCNF</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>1NF–3NF / BCNF</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>1NF–3NF / BCNF</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+    { title: `Why normalize`, body: `<p><b>Normalization</b> is the process of structuring tables so each fact is stored once. When a fact is duplicated, you get <b>anomalies</b>: an <em>update anomaly</em> (change a customer's tier in one row, forget another, now the data disagrees), an <em>insertion anomaly</em> (you cannot record a product's category until an order for it exists), and a <em>deletion anomaly</em> (deleting the last order for a product also erases the product).</p>
+<p>The normal forms are defined in terms of <b>functional dependencies</b>. A functional dependency <code>X -> Y</code> means: whenever two rows agree on the attributes in X, they must agree on Y. "X determines Y." Normalization works by ensuring every non-trivial dependency is a dependency <em>on a key</em>, not on some other column.</p>
+<pre>// ANOMALY: payment stores wallet_owner_email — update anomaly risk
+// If owner changes email, must update payments AND wallets
+
+// NORMALIZED: email lives only on Wallet
+@Entity
+@Table(name = "wallets")
+public class Wallet {
+
+    @Id
+    private String id;
+
+    @Column(name = "owner_email", unique = true)
+    private String ownerEmail;
+
+    @Column(name = "balance_minor", nullable = false)
+    private long balanceMinor;
+}</pre>` },
+    { title: `First normal form (1NF)`, body: `<p><b>1NF</b> requires that every column holds a single atomic value and every row is unique. No repeating groups, no arrays stuffed into one cell, no <code>phone1, phone2, phone3</code> columns. A customer with three phone numbers becomes three rows in a <code>customer_phone</code> child table, keyed by <code>(customer_id, phone)</code>. 1NF is the precondition that makes the higher forms even expressible.</p>
+<pre>// VIOLATION: multiple phone numbers in one row
+// wallet: id | phone1 | phone2 | phone3
+
+// 1NF: child table — one phone per row
+@Entity
+@Table(name = "wallet_contact_methods")
+public class WalletContactMethod {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(name = "wallet_id", nullable = false)
+    private String walletId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "type", nullable = false)
+    private ContactType type;  // EMAIL, PHONE
+
+    @Column(name = "value", nullable = false)
+    private String value;
+}</pre>` },
+    { title: `Second and third normal form`, body: `<p><b>2NF</b> applies when the primary key is <b>composite</b>. It forbids a <b>partial dependency</b>: a non-key attribute must depend on the <em>whole</em> key, not part of it. In <code>order_item(order_id, product_id, qty, product_name)</code>, <code>product_name</code> depends only on <code>product_id</code> — half the key — so it violates 2NF. Move <code>product_name</code> to the <code>product</code> table.</p>
+<p><b>3NF</b> forbids a <b>transitive dependency</b>: a non-key attribute must not depend on another non-key attribute. If <code>order(id, customer_id, customer_tier)</code> stores <code>customer_tier</code>, then <code>id -> customer_id -> customer_tier</code> — <code>customer_tier</code> depends on the key only through <code>customer_id</code>. The fix is to keep <code>customer_tier</code> on the <code>customer</code> table. The informal summary of 3NF: every non-key attribute depends on <em>the key, the whole key, and nothing but the key</em>.</p>
+<pre>// 3NF: payment references wallet; wallet holds owner tier — no transitive dep
+@Entity
+@Table(name = "wallets")
+public class Wallet {
+
+    @Id
+    private String id;
+
+    @Column(name = "owner_email")
+    private String ownerEmail;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "tier", nullable = false)
+    private WalletTier tier;  // tier lives HERE, not on Payment
+
+    @Column(name = "balance_minor", nullable = false)
+    private long balanceMinor;
+}
+
+@Entity
+@Table(name = "payments")
+public class Payment {
+
+    @Id
+    private String id;
+
+    @ManyToOne(optional = false)
+    @JoinColumn(name = "wallet_id", nullable = false)
+    private Wallet wallet;  // join to get tier — no duplication
+
+    @Column(name = "amount_minor", nullable = false)
+    private long amountMinor;
+}</pre>` },
+    { title: `Boyce–Codd normal form (BCNF)`, body: `<p><b>BCNF</b> is a stricter version of 3NF. The rule: for every non-trivial functional dependency <code>X -> Y</code>, <code>X</code> must be a <b>superkey</b> (a set of columns that uniquely identifies a row). 3NF allows a narrow exception when <code>Y</code> is itself part of a candidate key; BCNF removes that exception.</p>
+<p>The classic case is a table with <b>overlapping candidate keys</b>. Suppose in a scheduling table an instructor teaches exactly one subject, and each <code>(student, subject)</code> maps to one instructor: dependencies are <code>(student, subject) -> instructor</code> and <code>instructor -> subject</code>. The table is 3NF, but <code>instructor</code> is not a superkey, so it is not BCNF. Decompose into <code>teaches(instructor, subject)</code> and <code>enrolled(student, instructor)</code> so every determinant is a key.</p>
+<pre>// BCNF decomposition: merchant fee depends on merchant_id alone
+@Entity
+@Table(name = "merchants")
+public class Merchant {
+
+    @Id
+    private String id;
+
+    @Column(name = "display_name", nullable = false)
+    private String displayName;
+
+    @Column(name = "fee_bps", nullable = false)
+    private int feeBps;  // determined by merchant_id (the key) — BCNF OK
+}
+
+// Separate table if fee_schedule has overlapping candidate keys
+@Entity
+@Table(name = "merchant_fee_schedules")
+public class MerchantFeeSchedule {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(name = "merchant_id", nullable = false)
+    private String merchantId;
+
+    @Column(name = "fee_bps", nullable = false)
+    private int feeBps;
+
+    @Column(name = "effective_date", nullable = false)
+    private LocalDate effectiveDate;
+}</pre>` },
+    { title: `How far to normalize in practice`, body: `<p>Normalize to <b>3NF/BCNF by default</b> for transactional (OLTP) schemas like a payment ledger — correctness of money depends on there being one authoritative copy of each fact. The cost is that reads may need joins.</p>
+<p>BCNF decomposition is not always free: it can be <b>non-dependency-preserving</b>, meaning some functional dependency can no longer be enforced by a single-table constraint and now needs a trigger or application check. When a specific read path is hot and joins hurt, you deliberately step back down with <b>denormalization</b> — but you do that as a conscious, measured trade-off on top of a correct normalized core, not as an accident.</p>
+<pre>// Normalized core — 3NF payment schema
+@Entity @Table(name = "wallets")
+public class Wallet {
+    @Id private String id;
+    @Column(name = "balance_minor") private long balanceMinor;
+    @OneToMany(mappedBy = "wallet") private List&lt;LedgerEntry&gt; entries;
+}
+
+@Entity @Table(name = "ledger_entries")
+public class LedgerEntry {
+    @Id @GeneratedValue private Long id;
+    @ManyToOne @JoinColumn(name = "wallet_id") private Wallet wallet;
+    @Column(name = "amount_minor") private long amountMinor;
+    @ManyToOne @JoinColumn(name = "payment_id") private Payment payment;
+}
+
+@Entity @Table(name = "payments")
+public class Payment {
+    @Id private String id;
+    @ManyToOne @JoinColumn(name = "wallet_id") private Wallet wallet;
+    @Column(name = "amount_minor") private long amountMinor;
+    // Each fact in exactly one place — denormalize only measured hot paths
+}</pre>` },
   ],
-  figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="1NF–3NF / BCNF structure">
-<defs><marker id="fig-normal-forms-bcnf-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">1NF–3NF / BCNF</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-normal-forms-bcnf-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-normal-forms-bcnf-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-normal-forms-bcnf-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">1NF–3NF / BCNF — class and integration boundaries</text>
-</svg>`, caption: `Structure of the 1NF–3NF / BCNF pattern — components and data flow in Order Service.` }
-  ],
-  related: [],
-  
-  
-  template: "dataModel",
-  sim: () => ({
-    note: `Explore 1NF–3NF / BCNF in the payment platform. — schema view`,
-    toggles: [{ key: "fix", label: "Normalized design", kind: "ok", value: false }],
-    tables: (ctx) => ctx.toggles.fix ? [
-      { name: "payments", cols: [{ name: "id", pk: true }, { name: "wallet_id", fk: true }, { name: "amount" }] },
-      { name: "wallets", cols: [{ name: "id", pk: true }, { name: "balance" }] },
-      { name: "outbox", cols: [{ name: "id", pk: true }, { name: "event", fk: true }] },
-    ] : [
-      { name: "everything", cols: [{ name: "blob", pk: true }, { name: "misc" }] },
-    ],
-    relations: [{ from: "payments", to: "wallets" }],
-    status: (ctx) => ({ text: ctx.toggles.fix ? "schema supports 1NF–3NF / BCNF" : "schema fights the pattern", cls: ctx.toggles.fix ? "ok" : "warn" }),
-  }),
+  related: ["er-modeling", "denormalization-patterns", "primary-foreign-keys"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

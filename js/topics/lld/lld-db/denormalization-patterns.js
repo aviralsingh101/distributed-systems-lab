@@ -1,7 +1,5 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { tradeoffTemplate } from "../../../sim/templates/index.js";
 
 const topic = makeTopic({
   id: "denormalization-patterns",
@@ -10,75 +8,131 @@ const topic = makeTopic({
   track: "lld",
   tier: "essential",
   archetype: "pattern",
-  oneliner: `Duplicate data for read speed.`,
+  oneliner: `Deliberately storing redundant, precomputed, or duplicated data to make a hot read path fast — and paying for it with write-time consistency work.`,
   sections: [
-    { title: `Motivation`, body: `<p>Duplicate data for read speed.</p>
-<p>Without <b>Denormalization Patterns</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Denormalization Patterns</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Denormalization Patterns</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Denormalization Patterns</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Denormalization Patterns</b> changes to production:</p>
+    { title: `When and why to denormalize`, body: `<p><b>Denormalization</b> is the controlled reintroduction of redundancy on top of a normalized schema. You do it when a specific read is hot and its normalized form is too expensive — many joins, a large aggregate computed on every request, or fan-out across shards. The trade you are making is explicit: <b>faster reads in exchange for slower, more complex writes</b>, because every duplicated fact now has more than one place that must be kept in sync.</p>
+<p>The rule of thumb: normalize first, measure, then denormalize the proven bottleneck. Denormalizing before you have a read problem just buys you consistency bugs.</p>
+<pre>// Normalized: balance = SUM(ledger_entries.amount_minor) — accurate but slow
+// Denormalized: wallet.balance_minor column — fast read, maintained on write
+
+@Entity
+@Table(name = "wallets")
+public class Wallet {
+
+    @Id
+    private String id;
+
+    @Column(name = "balance_minor", nullable = false)
+    private long balanceMinor;  // DERIVED — maintained from ledger_entries
+
+    @Column(name = "currency", nullable = false, length = 3)
+    private String currency;
+
+    @Version
+    @Column(name = "version", nullable = false)
+    private int version;
+}</pre>` },
+    { title: `Common structures`, body: `<p>The main patterns, each a different way to trade write cost for read cost:</p>
 <ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
+<li><b>Precomputed aggregate</b> — store <code>wallet.balance</code> as a column instead of summing the Ledger on every read. The sum is maintained on each ledger write.</li>
+<li><b>Duplicated column</b> — copy a rarely-changing attribute onto the child, e.g. <code>order.customer_name</code>, so listing orders needs no join to Customer.</li>
+<li><b>Materialized view</b> — let the database maintain a physical, indexable snapshot of a query (<code>CREATE MATERIALIZED VIEW</code>), refreshed on a schedule or on demand.</li>
+<li><b>Read model / projection</b> — a separate table (or store) shaped exactly for one screen, populated asynchronously from events (CQRS).</li>
 </ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Denormalization Patterns</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<pre>// Duplicated column: payment stores wallet owner name — no join on list
+@Entity
+@Table(name = "payments")
+public class Payment {
+
+    @Id
+    private String id;
+
+    @Column(name = "wallet_id", nullable = false)
+    private String walletId;
+
+    @Column(name = "wallet_owner_name")  // copied from wallet at creation time
+    private String walletOwnerName;
+
+    @Column(name = "amount_minor", nullable = false)
+    private long amountMinor;
+
+    @Column(name = "created_at", nullable = false)
+    private Instant createdAt;
+}</pre>` },
+    { title: `Implementation flow for a maintained aggregate`, body: `<p>Take the wallet balance. To keep the denormalized <code>balance</code> correct you fold the maintenance into the same transaction that writes the source of truth:</p>
+<ol>
+<li>Open a transaction.</li>
+<li>Insert the immutable Ledger row (the source of truth).</li>
+<li>In the <em>same</em> transaction, update the aggregate: <code>UPDATE wallet SET balance = balance + :amount WHERE id = :wallet_id;</code></li>
+<li>Commit. Because both writes share one transaction, the aggregate can never drift from the ledger due to a partial failure.</li>
+</ol>
+<p>If maintenance cannot be transactional (the copy lives in another store), you rebuild it asynchronously from an event stream or the transactional outbox, accepting bounded staleness instead of drift.</p>
+<pre>@Service
+public class LedgerWriteService {
+
+    private final WalletRepository walletRepository;
+    private final LedgerEntryRepository ledgerRepository;
+
+    @Transactional
+    public void recordEntry(String walletId, long amountMinor, String paymentId) {
+        // 1. Insert immutable ledger row (source of truth)
+        LedgerEntry entry = new LedgerEntry();
+        entry.setWalletId(walletId);
+        entry.setAmountMinor(amountMinor);
+        entry.setPaymentId(paymentId);
+        entry.setCreatedAt(Instant.now());
+        ledgerRepository.save(entry);
+
+        // 2. Maintain denormalized aggregate in SAME transaction
+        Wallet wallet = walletRepository.findById(walletId).orElseThrow();
+        wallet.setBalanceMinor(wallet.getBalanceMinor() + amountMinor);
+        walletRepository.save(wallet);
+        // Both commit atomically — aggregate cannot drift
+    }
+}</pre>` },
+    { title: `Keeping copies consistent`, body: `<p>Every duplicated fact needs an owner and a maintenance strategy. Options, from strongest to weakest: (1) <b>same-transaction update</b> — synchronous, strongly consistent, but couples the write path; (2) <b>database trigger</b> — keeps logic in the DB but is easy to overlook in reviews; (3) <b>asynchronous projection</b> from events — decoupled and scalable but eventually consistent. Pick based on whether a stale copy is merely ugly or actually dangerous (a stale balance that lets a customer overspend is dangerous).</p>
+<pre>// Reconciliation job — detect drift between aggregate and source of truth
+@Scheduled(cron = "0 4 * * *")
+@Service
+public class BalanceReconciliationJob {
+
+    private final WalletRepository walletRepository;
+    private final LedgerEntryRepository ledgerRepository;
+
+    @Transactional(readOnly = true)
+    public void reconcile() {
+        List&lt;Wallet&gt; wallets = walletRepository.findAll();
+        for (Wallet wallet : wallets) {
+            long computed = ledgerRepository
+                .sumAmountByWalletId(wallet.getId());
+            if (computed != wallet.getBalanceMinor()) {
+                log.error("balance drift wallet={} stored={} computed={}",
+                    wallet.getId(), wallet.getBalanceMinor(), computed);
+                alertOps(wallet.getId(), wallet.getBalanceMinor(), computed);
+            }
+        }
+    }
+}</pre>` },
+    { title: `Costs and safeguards`, body: `<p>Denormalized data can and will drift — from bugs, backfills, or races. Build a <b>reconciliation job</b> that periodically recomputes the truth (sum the Ledger) and compares it against the stored aggregate, alerting on mismatch. Keep the normalized source of truth authoritative so you can always rebuild the copies. And document which columns are derived, so a future engineer does not "fix" a balance by writing to it directly. Denormalize the few paths that need it; leave the rest normalized.</p>
+<pre>@Repository
+public interface LedgerEntryRepository extends JpaRepository&lt;LedgerEntry, Long&gt; {
+
+    @Query("SELECT COALESCE(SUM(e.amountMinor), 0) FROM LedgerEntry e WHERE e.walletId = :walletId")
+    long sumAmountByWalletId(@Param("walletId") String walletId);
+}
+
+// Rebuild denormalized balance from authoritative ledger
+@Transactional
+public void rebuildBalance(String walletId) {
+    long computed = ledgerRepository.sumAmountByWalletId(walletId);
+    Wallet wallet = walletRepository.findById(walletId).orElseThrow();
+    wallet.setBalanceMinor(computed);
+    walletRepository.save(wallet);
+    log.info("rebuilt balance wallet={} balance={}", walletId, computed);
+}</pre>` },
   ],
-  figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Denormalization Patterns structure">
-<defs><marker id="fig-denormalization-patterns-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Denormalization…</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-denormalization-patterns-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-denormalization-patterns-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-denormalization-patterns-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Denormalization Patterns — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Denormalization Patterns pattern — components and data flow in Order Service.` }
-  ],
-  related: [],
-  
-  
-  template: "tradeoff",
-  sim: () => ({
-    note: `Explore Denormalization Patterns in the payment platform.`,
-    toggleLabel: "Switch approach",
-    labelA: "Without pattern",
-    labelB: "With Denormalization Patterns",
-    sideA: () => ({ nodes: [
-      { title: "Monolith path", active: true },
-      { title: "Tight coupling", value: "risk" },
-      { title: "Scale wall", value: "soon" },
-    ]}),
-    sideB: () => ({ nodes: [
-      { title: "Clear boundary", active: true },
-      { title: "Denormalization Patterns", value: "applied" },
-      { title: "Independent scale", value: "ok" },
-    ]}),
-    status: (ctx, t, useB) => ({ text: useB ? "Denormalization Patterns — better fit" : "naive — hits limits", cls: useB ? "ok" : "warn" }),
-  }),
+  related: ["normal-forms-bcnf", "read-replica-routing", "indexing-strategies", "audit-tables"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

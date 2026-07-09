@@ -1,7 +1,9 @@
 // @article-v2
+// @sim-lab
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { stateMachineTemplate } from "../../../sim/templates/index.js";
+import { createTopicSim } from "../../../sim/lab/registry.js";
+
+const PM_SVG = `<svg viewBox="0 0 560 150" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Process manager state machine"><defs><marker id="fig-process-manager-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs><rect x="14" y="55" width="96" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/><text x="62" y="79" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">AWAIT_PAYMENT</text><rect x="150" y="55" width="96" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/><text x="198" y="79" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">AWAIT_STOCK</text><rect x="286" y="55" width="96" height="40" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/><text x="334" y="79" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">SHIPPING</text><rect x="422" y="20" width="120" height="38" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/><text x="482" y="43" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">COMPLETED</text><rect x="422" y="92" width="120" height="38" rx="6" fill="#1a2236" stroke="#ff6b6b" stroke-width="1.5"/><text x="482" y="115" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">CANCELLED (timeout)</text><line x1="110" y1="75" x2="148" y2="75" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-process-manager-arr)"/><line x1="246" y1="75" x2="284" y2="75" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-process-manager-arr)"/><line x1="382" y1="68" x2="420" y2="45" stroke="#3ddc97" stroke-width="1.5" marker-end="url(#fig-process-manager-arr)"/><line x1="382" y1="82" x2="420" y2="108" stroke="#ff6b6b" stroke-width="1.5" marker-end="url(#fig-process-manager-arr)"/><text x="280" y="20" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">persistent state + timers advance on each incoming event</text></svg>`;
 
 const topic = makeTopic({
   id: "process-manager",
@@ -10,74 +12,100 @@ const topic = makeTopic({
   track: "lld",
   tier: "hidden-gem",
   archetype: "pattern",
-  oneliner: `Long-running workflow coordinator.`,
+  oneliner: "A persistent state machine that coordinates a long-running, multi-message workflow — deciding the next step from accumulated events and timeouts.",
   sections: [
-    { title: `Motivation`, body: `<p>Long-running workflow coordinator.</p>
-<p>Without <b>Process Manager</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Process Manager</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Process Manager</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Process Manager</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Process Manager</b> changes to production:</p>
+    {
+      title: "When one request spans minutes or days",
+      body: `<p>Some workflows are not a quick request/response. "Fulfil an order" might wait for a payment webhook, then a warehouse stock confirmation, then a carrier pickup — each arriving asynchronously, out of order, possibly hours apart, some never arriving. A stateless handler cannot manage this: it needs to <b>remember where it is</b> between messages.</p>
+<p>A <b>process manager</b> is a component whose entire job is to hold that state and drive the workflow forward. It is a persistent state machine, one instance per business transaction.</p>`,
+    },
+    {
+      title: "Structure",
+      figureAfter: "pm-flow",
+      body: `<p>Each process-manager instance stores: its <b>current state</b>, correlation ids linking it to the messages it cares about, and any data gathered so far. It defines, for each state, which incoming events are expected and what to do on each:</p>
 <ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
+<li>Receive an event &#8594; look up the instance by correlation id.</li>
+<li>Consult the state machine: given (current state, event), compute the next state and the commands to send.</li>
+<li>Persist the new state, then dispatch the commands.</li>
 </ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Process Manager</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<p>Crucially it also owns <b>timers</b>: "if stock is not confirmed within 30 minutes, cancel and refund". Timeouts are first-class transitions, not afterthoughts.</p>`,
+    },
+    {
+      title: "Implementation flow",
+      body: `<ol>
+<li>An initiating event (<code>OrderPlaced</code>) creates a new instance in state <code>AWAIT_PAYMENT</code> and schedules a timeout.</li>
+<li><code>PaymentCaptured</code> arrives &#8594; transition to <code>AWAIT_STOCK</code>, send <code>ReserveStock</code>, reset the timer.</li>
+<li><code>StockReserved</code> arrives &#8594; transition to <code>SHIPPING</code>, send <code>DispatchShipment</code>.</li>
+<li>If a timer fires before the expected event, transition to a compensating path (<code>CANCELLED</code>, issue refund).</li>
+</ol>
+<p>Because state is persisted after every transition, the workflow survives restarts and can run for arbitrarily long.</p>
+<pre>// --- Persistent process instance ---
+@Entity
+@Table(name = "order_process")
+public class OrderProcess {
+    @Id private UUID processId;
+    @Enumerated(EnumType.STRING)
+    private ProcessState state; // AWAIT_PAYMENT, AWAIT_STOCK, SHIPPING, ...
+    private UUID orderId;
+    private Instant timeoutAt;
+}
+
+public enum ProcessState {
+    AWAIT_PAYMENT, AWAIT_STOCK, SHIPPING, COMPLETED, CANCELLED
+}</pre>
+<pre>// --- Process manager: correlate events, advance state machine ---
+@Service
+public class OrderProcessManager {
+    private final OrderProcessRepository processes;
+    private final OutboxRepository outbox;
+
+    @KafkaListener(topics = "order.events")
+    @Transactional
+    public void onEvent(DomainEvent event) {
+        OrderProcess proc = processes.findByOrderId(event.orderId()).orElseThrow();
+        switch (proc.getState()) {
+            case AWAIT_PAYMENT when event instanceof PaymentCaptured e -&gt; {
+                proc.setState(ProcessState.AWAIT_STOCK);
+                proc.setTimeoutAt(Instant.now().plus(30, ChronoUnit.MINUTES));
+                outbox.save(OutboxEntity.command(proc.getProcessId(), "ReserveStock"));
+            }
+            case AWAIT_STOCK when event instanceof StockReserved -&gt; {
+                proc.setState(ProcessState.SHIPPING);
+                outbox.save(OutboxEntity.command(proc.getProcessId(), "DispatchShipment"));
+            }
+            default -&gt; { /* ignore or log unexpected */ }
+        }
+    }
+
+    @Scheduled(fixedRate = 60_000)
+    @Transactional
+    public void fireTimeouts() {
+        processes.findExpired(Instant.now()).forEach(proc -&gt; {
+            proc.setState(ProcessState.CANCELLED);
+            outbox.save(OutboxEntity.command(proc.getProcessId(), "RefundPayment"));
+        });
+    }
+}</pre>`,
+    },
+    {
+      title: "Process manager vs saga orchestrator",
+      body: `<p>The two overlap heavily and the terms are often used interchangeably. The useful distinction: a <b>saga orchestrator</b> is specifically about running a distributed transaction with forward steps and compensations. A <b>process manager</b> is the more general routing pattern — it maintains state and decides the next action across any multi-message flow, including ones that branch, wait on external actors, and are not strictly transactional. Both are stateful, correlated, and timer-aware; a saga orchestrator is essentially a process manager specialized for compensation.</p>`,
+    },
+    {
+      title: "Tradeoffs",
+      body: `<p><b>Pros:</b> makes complex, long-lived, event-driven workflows explicit, observable, and recoverable; centralizes timeout and error handling; correlation and state are managed in one place.</p>
+<p><b>Cons:</b> it is a stateful service you must persist, scale, and make idempotent (events are redelivered); risk of concentrating too much logic; correlation-id design and out-of-order/duplicate event handling are fiddly. <b>Use when</b> a workflow waits on multiple asynchronous events with timeouts; for simple linear flows, plain <b>choreography</b> is lighter. Workflow engines (Temporal, Camunda) implement this pattern for you.</p>`,
+    },
   ],
   figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Process Manager structure">
-<defs><marker id="fig-process-manager-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Process Manager</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-process-manager-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-process-manager-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-process-manager-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Process Manager — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Process Manager pattern — components and data flow in Order Service.` }
+    { id: "pm-flow", svg: PM_SVG, caption: "A process manager persists workflow state and advances a state machine as correlated events (and timeouts) arrive, branching to completion or compensation." },
   ],
-  related: [],
-  
-  
-  template: "stateMachine",
-  sim: () => ({
-    note: `Explore Process Manager in the payment platform.`,
-    toggles: [{ key: "fix", label: "Valid transitions only", kind: "ok", value: false }],
-    states: (ctx) => [
-      { id: "pending", label: "Pending", x: 200, y: 280, color: C.service },
-      { id: "active", label: "Process Manager", x: 500, y: 280, color: C.accent, good: true },
-      { id: "done", label: "Settled", x: 800, y: 280, color: C.ok, good: true },
-      { id: "bad", label: "Invalid", x: 500, y: 420, color: C.err, bad: true },
-    ],
-    currentState: (ctx, t) => {
-      if (!ctx.toggles.fix && (t % 6) > 4) return "bad";
-      return ["pending", "active", "done"][Math.floor((t * 0.35) % 3)];
-    },
-    transitions: [{ from: "pending", to: "active", label: "apply" }, { from: "active", to: "done", label: "commit" }],
-    status: (ctx) => ({ text: ctx.toggles.fix ? "state machine guards flow" : "illegal states possible", cls: ctx.toggles.fix ? "ok" : "err" }),
-  }),
+  related: ["saga-orchestration", "saga-choreography", "correlation-trace-ids", "transactional-outbox", "delayed-scheduled-messages"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
+
 export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
+  return createTopicSim("process-manager", stage, panel, stageEl);
 }

@@ -1,7 +1,5 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { tradeoffTemplate } from "../../../sim/templates/index.js";
 
 const topic = makeTopic({
   id: "monolith-vs-microservices",
@@ -34,42 +32,12 @@ const topic = makeTopic({
 <p>Interview tip: whiteboard the charge flow, mark where <b>Monolith vs Microservices</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
   ],
   figures: [
-    { id: "comparison", svg: `<svg viewBox="0 0 480 150" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Monolith vs Microservices comparison">
-<rect x="40" y="50" width="160" height="70" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="120" y="79" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Option A</text><text x="120" y="99" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">simpler / fewer parts</text>
-<rect x="280" y="50" width="160" height="70" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="360" y="79" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Option B</text><text x="360" y="99" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">scale / specialization</text>
-<text x="240" y="30" text-anchor="middle" fill="#cdd6e8" font-size="12" font-weight="600" font-family="system-ui">Monolith vs Microservices</text>
-<text x="120" y="95" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">lower ops cost</text>
-<text x="360" y="95" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">higher headroom</text>
-<text x="240" y="135" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Prototype under realistic load before choosing</text>
-</svg>`, caption: `Decision fork for Monolith vs Microservices — weigh simplicity vs scale before committing.` }
+    { id: "architecture", svg: `<svg viewBox="0 0 460 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Monolith vs Microservices architecture"> <text x="230" y="18" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">System components</text> <rect x="30" y="40" width="120" height="44" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/> <text x="90" y="66" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Client</text> <rect x="170" y="40" width="120" height="44" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/> <text x="230" y="66" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">API</text> <rect x="310" y="40" width="120" height="44" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/> <text x="370" y="66" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">DB</text> <rect x="30" y="95" width="120" height="44" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/> <text x="90" y="121" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Cache</text> <rect x="170" y="95" width="120" height="44" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/> <text x="230" y="121" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Queue</text> </svg>`, caption: `Monolith vs Microservices: high-level components and data flow for the system design.` },
   ],
   related: [],
   
   
-  template: "tradeoff",
-  sim: () => ({
-    note: `Explore Monolith vs Microservices in the payment platform.`,
-    toggleLabel: "Switch approach",
-    labelA: "Without pattern",
-    labelB: "With Monolith vs Microservices",
-    sideA: () => ({ nodes: [
-      { title: "Monolith path", active: true },
-      { title: "Tight coupling", value: "risk" },
-      { title: "Scale wall", value: "soon" },
-    ]}),
-    sideB: () => ({ nodes: [
-      { title: "Clear boundary", active: true },
-      { title: "Monolith vs Microservices", value: "applied" },
-      { title: "Independent scale", value: "ok" },
-    ]}),
-    status: (ctx, t, useB) => ({ text: useB ? "Monolith vs Microservices — better fit" : "naive — hits limits", cls: useB ? "ok" : "warn" }),
-  }),
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

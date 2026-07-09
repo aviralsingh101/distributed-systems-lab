@@ -1,7 +1,27 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { stateMachineTemplate } from "../../../sim/templates/index.js";
+
+const CLASS_SVG = `<svg viewBox="0 0 580 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Command class structure">
+  <defs><marker id="fig-command-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
+  <rect x="20" y="80" width="120" height="48" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
+  <text x="80" y="100" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">Invoker</text>
+  <text x="80" y="116" text-anchor="middle" fill="#93a1bd" font-size="8" font-family="system-ui">queue / worker</text>
+  <rect x="200" y="16" width="170" height="52" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
+  <text x="285" y="35" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">«interface» Command</text>
+  <line x1="200" y1="44" x2="370" y2="44" stroke="#26324a"/>
+  <text x="210" y="61" fill="#93a1bd" font-size="9" font-family="ui-monospace,monospace">+ execute() / + undo()</text>
+  <rect x="200" y="120" width="170" height="56" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
+  <text x="285" y="140" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">RefundCommand</text>
+  <text x="285" y="157" text-anchor="middle" fill="#93a1bd" font-size="8" font-family="ui-monospace,monospace">receiver + paymentId + amount</text>
+  <rect x="420" y="120" width="140" height="56" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
+  <text x="490" y="146" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger (receiver)</text>
+  <text x="490" y="162" text-anchor="middle" fill="#93a1bd" font-size="8" font-family="system-ui">does the work</text>
+  <line x1="140" y1="100" x2="198" y2="60" stroke="#5b9dff" stroke-width="1.4" marker-end="url(#fig-command-arr)"/>
+  <text x="150" y="92" fill="#93a1bd" font-size="8" font-family="system-ui">holds</text>
+  <line x1="285" y1="120" x2="285" y2="70" stroke="#3ddc97" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#fig-command-arr)"/>
+  <line x1="370" y1="148" x2="418" y2="148" stroke="#5b9dff" stroke-width="1.4" marker-end="url(#fig-command-arr)"/>
+  <text x="378" y="140" fill="#93a1bd" font-size="8" font-family="system-ui">calls</text>
+</svg>`;
 
 const topic = makeTopic({
   id: "command",
@@ -10,74 +30,81 @@ const topic = makeTopic({
   track: "lld",
   tier: "essential",
   archetype: "pattern",
-  oneliner: `Encapsulate request as object.`,
+  oneliner: `Turn a request into a first-class object so it can be queued, logged, retried, and undone — decoupling who triggers an action from who performs it.`,
   sections: [
-    { title: `Motivation`, body: `<p>Encapsulate request as object.</p>
-<p>Without <b>Command</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Command</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Command</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Command</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Command</b> changes to production:</p>
+    { title: `Intent`, body: `<p><b>Command</b> encapsulates a request as an object. Once an action is a value rather than a method call, you can parameterize code with different requests, put them in a queue, log them for audit or replay, and support undo.</p>
+<p>The decoupling is between the <em>invoker</em> (what triggers the action) and the <em>receiver</em> (what carries it out). A worker pulling <code>RefundCommand</code>, <code>CaptureCommand</code>, and <code>HoldCommand</code> objects off a queue does not need to know how a refund is performed — it just calls <code>execute()</code>.</p>
+<pre>// --- Command: the request as a first-class object ---
+public interface PaymentCommand {
+    void execute();
+    void undo();
+}</pre>` },
+    { title: `Participants and structure`, figureAfter: "command-class", body: `<p>Five roles:</p>
 <ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
+<li><b>Command</b> — the interface, typically <code>execute()</code> and optionally <code>undo()</code>.</li>
+<li><b>Concrete Command</b> — <code>RefundCommand</code>, binding a receiver plus the parameters (paymentId, amount).</li>
+<li><b>Receiver</b> — the object that knows how to do the work (<code>Ledger</code>, <code>Wallet</code>).</li>
+<li><b>Invoker</b> — holds and triggers commands (a queue processor or button handler).</li>
+<li><b>Client</b> — creates the concrete command and wires it to its receiver.</li>
 </ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Command</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<pre>// --- Concrete command: binds receiver + parameters ---
+public final class ChargeCommand implements PaymentCommand {
+    private final PaymentGateway gateway;
+    private final ChargeRequest request;
+    private ChargeResult result;  // captured for undo
+
+    public ChargeCommand(PaymentGateway gateway, ChargeRequest request) {
+        this.gateway = gateway;
+        this.request = request;
+    }
+
+    @Override
+    public void execute() {
+        result = gateway.charge(request);
+    }
+
+    @Override
+    public void undo() {
+        if (result != null &amp;&amp; result.status() == ChargeStatus.CAPTURED) {
+            gateway.refund(result.paymentId(), request.amount());
+        }
+    }
+}</pre>` },
+    { title: `Implementation flow`, body: `<p>The request becomes data that travels through the system:</p>
+<ol>
+<li>Client builds <code>new RefundCommand(ledger, paymentId, 1200)</code> and hands it to the invoker.</li>
+<li>The invoker stores it — in memory, or serialized into a durable queue or outbox — decoupling submission from execution in time.</li>
+<li>Later, the invoker calls <code>command.execute()</code>, which invokes the receiver; on failure it can retry the same object, and <code>undo()</code> can run a compensating action.</li>
+</ol>
+<pre>// --- Invoker: queues and executes commands ---
+public final class PaymentCommandInvoker {
+    private final Deque&lt;PaymentCommand&gt; history = new ArrayDeque&lt;&gt;();
+
+    public void submit(PaymentCommand command) {
+        command.execute();
+        history.push(command);
+    }
+
+    public void undoLast() {
+        if (!history.isEmpty()) {
+            history.pop().undo();
+        }
+    }
+}
+
+// Client wires receiver into command, hands to invoker
+PaymentCommand cmd = new ChargeCommand(gateway, chargeRequest);
+invoker.submit(cmd);
+// later: invoker.undoLast();  // compensating refund</pre>
+<p>Because a command carries everything needed to run, it enables macro commands (a Composite of commands), transaction logs, and the write side of <b>CQRS</b>, where each command maps to a handler.</p>` },
+    { title: `Trade-offs and Strategy contrast`, body: `<p>Command unlocks undo/redo, queuing, retries, scheduling, and auditability, at the price of a class (or object) per action. For undo you must capture enough state to reverse the effect, which is where <b>Memento</b> often pairs in.</p>
+<p>It resembles <b>Strategy</b> — both wrap behaviour in an object — but the emphasis differs. Strategy encapsulates an <em>interchangeable algorithm</em> that a context runs now; Command encapsulates an <em>invocation as data</em> so it can be deferred, stored, replayed, and reversed. Strategy answers "how"; Command answers "do this, later, maybe undoably."</p>` },
   ],
   figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Command structure">
-<defs><marker id="fig-command-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Command</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-command-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-command-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-command-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Command — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Command pattern — components and data flow in Order Service.` }
+    { id: "command-class", svg: CLASS_SVG, caption: "The invoker holds Command objects and calls execute(); each concrete command binds a receiver and its parameters." },
   ],
-  related: [],
-  
-  
-  template: "stateMachine",
-  sim: () => ({
-    note: `Explore Command in the payment platform.`,
-    toggles: [{ key: "fix", label: "Valid transitions only", kind: "ok", value: false }],
-    states: (ctx) => [
-      { id: "pending", label: "Pending", x: 200, y: 280, color: C.service },
-      { id: "active", label: "Command", x: 500, y: 280, color: C.accent, good: true },
-      { id: "done", label: "Settled", x: 800, y: 280, color: C.ok, good: true },
-      { id: "bad", label: "Invalid", x: 500, y: 420, color: C.err, bad: true },
-    ],
-    currentState: (ctx, t) => {
-      if (!ctx.toggles.fix && (t % 6) > 4) return "bad";
-      return ["pending", "active", "done"][Math.floor((t * 0.35) % 3)];
-    },
-    transitions: [{ from: "pending", to: "active", label: "apply" }, { from: "active", to: "done", label: "commit" }],
-    status: (ctx) => ({ text: ctx.toggles.fix ? "state machine guards flow" : "illegal states possible", cls: ctx.toggles.fix ? "ok" : "err" }),
-  }),
+  related: ["strategy", "memento", "cqrs-handler-separation", "dead-letter-pattern", "transactional-outbox"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

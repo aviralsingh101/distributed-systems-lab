@@ -1,7 +1,5 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { tradeoffTemplate } from "../../../sim/templates/index.js";
 
 const topic = makeTopic({
   id: "contract-first-vs-code-first",
@@ -10,66 +8,128 @@ const topic = makeTopic({
   track: "lld",
   tier: "essential",
   archetype: "tradeoff",
-  oneliner: `Schema drives code or reverse.`,
+  oneliner: `Do you write the API schema (OpenAPI/proto) first and generate code from it, or write the code first and generate the schema from it?`,
   sections: [
-    { title: `The decision`, body: `<p>Schema drives code or reverse. This is an architectural fork — not a universal winner. The right choice depends on consistency requirements, team expertise, operational budget, and how your payment platform scales.</p>
-<p>Document the decision in an ADR: context, options considered, chosen option, and consequences. Revisit when SLOs breach or team composition changes.</p>` },
-    { title: `Option A — when it wins`, body: `<p>The first path optimizes for simplicity and time-to-market. Fewer moving parts mean faster onboarding for engineers and lower operational surface area. Strong fit when traffic is moderate, consistency needs are straightforward, and the team is small.</p>
-<p>Trade-off: may hit scaling ceilings — hot wallet rows, broker lag, or regional failover complexity appear as QPS grows.</p>` },
-    { title: `Option B — when it wins`, body: `<p>The second path optimizes for scale, isolation, or specialized workloads. Higher upfront complexity buys headroom: independent deploy units, partition tolerance, or workload-specific storage engines.</p>
-<p>Trade-off: more components to operate, monitor, and debug. Incidents require deeper runbooks and cross-team coordination.</p>` },
-    { title: `Comparison`, body: `<p>Evaluate latency (p50 and p99), consistency guarantees, operability, migration cost, and hiring pool. Payment platforms often need strong correctness on the Ledger write path with relaxed consistency on analytics and loyalty projections.</p>
-<p>Prototype both paths under realistic parallel charge load before committing — paper comparisons miss tail latency, retry storms, and reconciliation toil.</p>` },
-    { title: `Decision guide for Contract-First vs Code-First`, body: `<p>Choose the simpler option that meets current SLOs. Escalate complexity only when metrics prove failure: duplicate charges, unreconciled settlements, p99 breaches during peak, or ops toil blocking feature velocity.</p>
-<p>Regardless of choice, instrument <b>Contract-First vs Code-First</b> with metrics, run game-days, and keep rollback documented before any migration.</p>` },
-    { title: `Production checklist`, body: `<p>Before committing to either side of <b>Contract-First vs Code-First</b>: load-test peak checkout, measure reconciliation drift, document RTO/RPO, and ensure on-call runbooks cover the failure modes each option introduces.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Contract-First vs Code-First</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
+    { title: `Two directions of truth`, body: `<p>Every API has a contract — the schema describing its endpoints, types, and errors (OpenAPI for REST, <code>.proto</code> for gRPC, SDL for GraphQL). The question is which artifact is the <b>source of truth</b>. In <b>contract-first</b> (design-first) you author the schema by hand, then generate server stubs, client SDKs, and validation from it. In <b>code-first</b> you write the implementation (annotated handlers/structs) and a tool generates the schema from your code.</p>
+<p>This is a real fork about coupling, collaboration, and drift — not a matter of taste.</p>
+<pre>// Contract-first OpenAPI fragment — reviewed before any Java exists
+// openapi/payments-v1.yaml
+// paths:
+//   /v1/payments/{id}:
+//     get:
+//       operationId: getPayment
+//       responses:
+//         '200':
+//           content:
+//             application/json:
+//               schema:
+//                 $ref: '#/components/schemas/PaymentResponse'
+// components:
+//   schemas:
+//     PaymentResponse:
+//       type: object
+//       required: [id, walletId, amountMinor, status]
+//       properties:
+//         id: { type: string }
+//         walletId: { type: string }
+//         amountMinor: { type: integer, format: int64 }
+//         status: { type: string, enum: [PENDING, CAPTURED, DECLINED] }</pre>` },
+    { title: `Contract-first — when it wins`, body: `<p>You design the schema (often collaboratively, in a repo) before implementing. Tools like OpenAPI Generator / protoc emit server interfaces and typed clients.</p>
+<p><b>Pros:</b> the contract is an explicit, reviewable agreement, so front-end/back-end/partner teams can work in <b>parallel</b> against a stub and mock immediately. It enables <b>consumer-driven contracts</b> and prevents the implementation from accidentally shaping the API. The schema can't silently drift from intent because it <em>is</em> the intent. <b>Cons:</b> more upfront ceremony; you must keep generated code and hand-written logic in sync; and editing large schemas by hand (and regenerating) has friction. gRPC is essentially always contract-first because proto is mandatory.</p>
+<pre>// Generated interface from OpenAPI — implement, don't edit
+public interface PaymentsApi {
+
+    @GetMapping("/v1/payments/{id}")
+    PaymentResponse getPayment(@PathVariable("id") String id);
+
+    @PostMapping("/v1/payments")
+    ResponseEntity&lt;PaymentResponse&gt; createPayment(
+        @RequestBody CreatePaymentRequest body,
+        @RequestHeader("Idempotency-Key") String idempotencyKey);
+}
+
+// Hand-written implementation behind the generated contract
+@RestController
+public class PaymentsApiController implements PaymentsApi {
+
+    private final PaymentService paymentService;
+
+    public PaymentsApiController(PaymentService paymentService) {
+        this.paymentService = paymentService;
+    }
+
+    @Override
+    public PaymentResponse getPayment(String id) {
+        return paymentService.findById(id)
+            .orElseThrow(() -&gt; new PaymentNotFoundException(id));
+    }
+
+    @Override
+    public ResponseEntity&lt;PaymentResponse&gt; createPayment(
+            CreatePaymentRequest body, String idempotencyKey) {
+        PaymentResponse created = paymentService.create(body, idempotencyKey);
+        return ResponseEntity.created(URI.create("/v1/payments/" + created.id()))
+            .body(created);
+    }
+}</pre>` },
+    { title: `Code-first — when it wins`, body: `<p>You write the handlers and models; a library introspects them to produce the OpenAPI/GraphQL schema (e.g. from decorators/annotations).</p>
+<p><b>Pros:</b> fastest to start, no separate schema to maintain, and the docs are generated from code so they can't lag the implementation for existing fields. Natural fit for small teams, internal services, and rapid iteration where the code <em>is</em> the design. <b>Cons:</b> the API shape becomes a byproduct of implementation details, which leaks internals and makes breaking changes easy to introduce unnoticed; parallel client development is harder (no contract until the code exists); and cross-team/partner review is weaker because there's no agreed artifact reviewed before coding.</p>
+<pre>// Code-first: SpringDoc generates OpenAPI from annotations at runtime
+@RestController
+@RequestMapping("/v1/wallets")
+@Tag(name = "Wallets", description = "Wallet balance and ledger operations")
+public class WalletController {
+
+    private final WalletService walletService;
+
+    public WalletController(WalletService walletService) {
+        this.walletService = walletService;
+    }
+
+    @Operation(summary = "Get wallet by ID")
+    @ApiResponse(responseCode = "200", description = "Wallet found")
+    @ApiResponse(responseCode = "404", description = "Wallet not found")
+    @GetMapping("/{walletId}")
+    public WalletResponse getWallet(
+            @Parameter(description = "Wallet UUID") @PathVariable String walletId) {
+        return walletService.findById(walletId)
+            .orElseThrow(() -&gt; new WalletNotFoundException(walletId));
+    }
+
+    @PostMapping
+    @Operation(summary = "Create a new wallet")
+    public ResponseEntity&lt;WalletResponse&gt; createWallet(
+            @Valid @RequestBody CreateWalletRequest request) {
+        WalletResponse created = walletService.create(request);
+        return ResponseEntity.created(URI.create("/v1/wallets/" + created.id()))
+            .body(created);
+    }
+}</pre>` },
+    { title: `Decision guide`, body: `<ul>
+<li><b>Choose contract-first</b> for public/partner APIs, multi-team or multi-language ecosystems, and anywhere the interface must be stable and reviewed independently of implementation — and always for gRPC.</li>
+<li><b>Choose code-first</b> for small teams, internal-only services, prototypes, and single-language shops iterating quickly, where speed beats formal upfront agreement.</li>
+<li><b>Either way, close the loop:</b> commit the schema to version control, run it through <b>contract tests</b> and a <b>breaking-change linter</b> in CI, and publish generated SDKs. The failure to avoid — in both approaches — is <b>drift</b> between what the schema says and what the server actually does.</li>
 </ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Contract-First vs Code-First</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<p>Many mature teams converge on contract-first as the API surface grows and more consumers depend on stability.</p>
+<pre>// gRPC is always contract-first — proto drives both sides
+// payment.proto → protoc generates Java stubs
+//   PaymentServiceGrpc.PaymentServiceImplBase  (server)
+//   PaymentServiceGrpc.PaymentServiceBlockingStub  (client)
+
+@GrpcService
+public class PaymentGrpcService extends PaymentServiceGrpc.PaymentServiceImplBase {
+    // Implementation conforms to the proto contract — no drift possible
+    @Override
+    public void charge(ChargeRequest request, StreamObserver&lt;ChargeReply&gt; observer) {
+        // ...
+    }
+}
+
+// CI: breaking-change linter on openapi/payments-v1.yaml
+//   oasdiff breaking openapi/payments-v1.yaml openapi/payments-v1-pr.yaml</pre>` },
   ],
-  figures: [
-    { id: "comparison", svg: `<svg viewBox="0 0 480 150" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Contract-First vs Code-First comparison">
-<rect x="40" y="50" width="160" height="70" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="120" y="79" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Option A</text><text x="120" y="99" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">simpler / fewer parts</text>
-<rect x="280" y="50" width="160" height="70" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="360" y="79" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Option B</text><text x="360" y="99" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">scale / specialization</text>
-<text x="240" y="30" text-anchor="middle" fill="#cdd6e8" font-size="12" font-weight="600" font-family="system-ui">Contract-First vs Code-First</text>
-<text x="120" y="95" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">lower ops cost</text>
-<text x="360" y="95" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">higher headroom</text>
-<text x="240" y="135" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Prototype under realistic load before choosing</text>
-</svg>`, caption: `Decision fork for Contract-First vs Code-First — weigh simplicity vs scale before committing.` }
-  ],
-  related: [],
-  
-  
-  template: "tradeoff",
-  sim: () => ({
-    note: `Explore Contract-First vs Code-First in the payment platform.`,
-    toggleLabel: "Switch approach",
-    labelA: "Without pattern",
-    labelB: "With Contract-First vs Code-First",
-    sideA: () => ({ nodes: [
-      { title: "Monolith path", active: true },
-      { title: "Tight coupling", value: "risk" },
-      { title: "Scale wall", value: "soon" },
-    ]}),
-    sideB: () => ({ nodes: [
-      { title: "Clear boundary", active: true },
-      { title: "Contract-First vs Code-First", value: "applied" },
-      { title: "Independent scale", value: "ok" },
-    ]}),
-    status: (ctx, t, useB) => ({ text: useB ? "Contract-First vs Code-First — better fit" : "naive — hits limits", cls: useB ? "ok" : "warn" }),
-  }),
+  related: ["api-versioning-strategies", "rest-resource-modeling", "grpc-service-design", "graphql-schema-design", "error-contract-design"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

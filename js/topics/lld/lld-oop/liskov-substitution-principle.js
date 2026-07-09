@@ -1,7 +1,5 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { layerTemplate } from "../../../sim/templates/index.js";
 
 const topic = makeTopic({
   id: "liskov-substitution-principle",
@@ -9,69 +7,74 @@ const topic = makeTopic({
   category: "lld-oop",
   track: "lld",
   tier: "essential",
-  archetype: "pattern",
-  oneliner: `Subtypes must honor contracts.`,
+  archetype: "concept",
+  oneliner: `Objects of a subtype must be usable anywhere the supertype is expected without breaking the program's correctness.`,
   sections: [
-    { title: `Motivation`, body: `<p>Subtypes must honor contracts.</p>
-<p>Without <b>Liskov Substitution</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Liskov Substitution</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Liskov Substitution</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Liskov Substitution</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Liskov Substitution</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Liskov Substitution</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+    { title: `The formal statement`, body: `<p>Barbara Liskov's <b>Substitution Principle (LSP)</b>, the "L" in SOLID, says: if <code>S</code> is a subtype of <code>T</code>, then objects of type <code>T</code> may be replaced with objects of type <code>S</code> <em>without altering any of the desirable properties of the program</em>. In short, a subtype must honor the <b>behavioral contract</b> of its supertype, not merely its method signatures.</p>
+<p>A compiler only checks that the subclass has the right method shapes. LSP is about semantics: what those methods promise. Inheriting a type means committing to everything callers were allowed to assume about the base type.</p>` },
+    { title: `How it works — the contract rules`, body: `<p>Substitutability works by preserving the contract along three dimensions. <b>Preconditions may not be strengthened:</b> a subtype cannot demand more of its inputs than the base did. <b>Postconditions may not be weakened:</b> the subtype must deliver at least what the base promised. <b>Invariants and history constraints must be preserved:</b> the subtype cannot allow states or transitions the base forbade.</p>
+<p>Method parameters may be <em>contravariant</em> (accept wider types) and return values <em>covariant</em> (return narrower types); violating this variance breaks substitution.</p>` },
+    { title: `The classic violation — Rectangle and Square`, body: `<p>The textbook counterexample is <b>Rectangle/Square</b>. A <code>Square</code> "is-a" <code>Rectangle</code> mathematically, so a naive design subclasses it. But <code>Rectangle</code> callers assume they can set width and height independently; a <code>Square</code> that keeps them equal breaks that assumption.</p>
+<pre>// VIOLATION: Square breaks Rectangle's postcondition
+public class Rectangle {
+    protected int width, height;
+    public void setWidth(int w)  { width = w; }
+    public void setHeight(int h) { height = h; }
+    public int area() { return width * height; }
+}
+
+public class Square extends Rectangle {
+    @Override public void setWidth(int w)  { width = height = w; }
+    @Override public void setHeight(int h) { width = height = h; }
+}
+
+// Caller expects area == 20 — gets 16 with a Square
+void resize(Rectangle r) {
+    r.setWidth(5);
+    r.setHeight(4);
+    assert r.area() == 20;  // FAILS when r is a Square
+}</pre>
+<p>A payment analog: a <code>ReadOnlyLedger</code> subclassing <code>Ledger</code> but throwing on <code>post()</code> strengthens preconditions to the point of failure — any code holding a <code>Ledger</code> can now crash unexpectedly.</p>
+<pre>// VIOLATION: ReadOnlyLedger cannot substitute Ledger
+public class Ledger {
+    public void post(LedgerEntry entry) { /* append to log */ }
+}
+
+public class ReadOnlyLedger extends Ledger {
+    @Override
+    public void post(LedgerEntry entry) {
+        throw new UnsupportedOperationException("read-only");
+    }
+}
+
+void reconcile(Ledger ledger) {
+    ledger.post(new LedgerEntry("adjustment", 100));  // crashes with ReadOnlyLedger
+}</pre>` },
+    { title: `How to fix violations`, body: `<p>When a subtype cannot honor the contract, the inheritance is wrong, not the caller. Options: make the base abstraction weaker so both types genuinely satisfy it, replace inheritance with composition, or split the hierarchy so the incompatible operation lives only where it is valid.</p>
+<pre>// FIX: weaker abstraction both types satisfy
+public interface Shape {
+    int area();
+}
+
+public record Rectangle(int width, int height) implements Shape {
+    public int area() { return width * height; }
+}
+
+public record Square(int side) implements Shape {
+    public int area() { return side * side; }
+}
+
+// FIX: composition for read-only view
+public final class ReadOnlyLedgerView {
+    private final Ledger ledger;
+    public ReadOnlyLedgerView(Ledger ledger) { this.ledger = ledger; }
+    public List&lt;LedgerEntry&gt; entries() { return List.copyOf(ledger.getEntries()); }
+    // no post() — callers that need write access use Ledger directly
+}</pre>
+<p>LSP is the principle that makes polymorphism and the Open/Closed Principle trustworthy — without it, "extending" a type quietly breaks its clients.</p>` },
   ],
-  figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Liskov Substitution structure">
-<defs><marker id="fig-liskov-substitution-principle-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Liskov Substitu…</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-liskov-substitution-principle-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-liskov-substitution-principle-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-liskov-substitution-principle-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Liskov Substitution — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Liskov Substitution pattern — components and data flow in Order Service.` }
-  ],
-  related: [],
-  
-  
-  template: "layer",
-  sim: () => ({
-    note: `Explore Liskov Substitution in the payment platform.`,
-    toggles: [{ key: "fix", label: "Apply layering", kind: "ok", value: false }],
-    layers: (ctx) => [
-      { name: "API", components: [{ title: "REST/gRPC", active: true }] },
-      { name: "Domain", components: [{ title: "Liskov Substitution", active: ctx.toggles.fix, color: C.accent }] },
-      { name: "Data", components: [{ title: "Ledger", color: C.ledger }, { title: "Queue", color: C.queue }] },
-    ],
-    status: (ctx) => ({ text: ctx.toggles.fix ? "clean separation" : "logic leaks across layers", cls: ctx.toggles.fix ? "ok" : "err" }),
-  }),
+  related: ["polymorphism", "open-closed-principle", "inheritance-pitfalls", "composition-over-inheritance"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

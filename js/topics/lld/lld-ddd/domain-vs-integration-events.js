@@ -1,7 +1,22 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { flowTemplate } from "../../../sim/templates/index.js";
+
+const EV_SVG = `<svg viewBox="0 0 720 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Domain vs integration events">
+  <defs><marker id="fig-domain-vs-integration-events-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
+  <rect x="30" y="35" width="300" height="140" rx="10" fill="none" stroke="#3ddc97" stroke-width="1.6" stroke-dasharray="5 4"/>
+  <text x="180" y="55" text-anchor="middle" fill="#3ddc97" font-size="11" font-family="system-ui">Payments context</text>
+  <rect x="70" y="70" width="100" height="30" rx="5" fill="#1a2236" stroke="#5b9dff" stroke-width="1.4"/><text x="120" y="90" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">Aggregate</text>
+  <rect x="200" y="70" width="100" height="30" rx="5" fill="#1a2236" stroke="#7c5cff" stroke-width="1.4"/><text x="250" y="90" text-anchor="middle" fill="#cdd6e8" font-size="9" font-family="system-ui">handler</text>
+  <line x1="170" y1="85" x2="198" y2="85" stroke="#3ddc97" stroke-width="1.3" marker-end="url(#fig-domain-vs-integration-events-arr)"/>
+  <text x="180" y="130" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">domain event: in-process,</text>
+  <text x="180" y="146" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">synchronous, rich objects</text>
+  <rect x="470" y="70" width="220" height="60" rx="8" fill="#1a2236" stroke="#5b9dff" stroke-width="1.6"/>
+  <text x="580" y="94" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">Ledger / Notification</text>
+  <text x="580" y="112" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">other contexts</text>
+  <line x1="300" y1="85" x2="468" y2="95" stroke="#7c5cff" stroke-width="1.6" marker-end="url(#fig-domain-vs-integration-events-arr)"/>
+  <text x="390" y="72" text-anchor="middle" fill="#7c5cff" font-size="9" font-family="system-ui">integration event via broker</text>
+  <text x="580" y="160" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">versioned contract, async, flat DTO</text>
+</svg>`;
 
 const topic = makeTopic({
   id: "domain-vs-integration-events",
@@ -9,77 +24,137 @@ const topic = makeTopic({
   category: "lld-ddd",
   track: "lld",
   tier: "hidden-gem",
-  archetype: "tradeoff",
-  oneliner: `Inside context vs cross-boundary.`,
+  archetype: "concept",
+  oneliner: `Domain events communicate inside one bounded context; integration events are a versioned contract published to others — conflating them couples your services to your internals.`,
   sections: [
-    { title: `The decision`, body: `<p>Inside context vs cross-boundary. This is an architectural fork — not a universal winner. The right choice depends on consistency requirements, team expertise, operational budget, and how your payment platform scales.</p>
-<p>Document the decision in an ADR: context, options considered, chosen option, and consequences. Revisit when SLOs breach or team composition changes.</p>` },
-    { title: `Option A — when it wins`, body: `<p>The first path optimizes for simplicity and time-to-market. Fewer moving parts mean faster onboarding for engineers and lower operational surface area. Strong fit when traffic is moderate, consistency needs are straightforward, and the team is small.</p>
-<p>Trade-off: may hit scaling ceilings — hot wallet rows, broker lag, or regional failover complexity appear as QPS grows.</p>` },
-    { title: `Option B — when it wins`, body: `<p>The second path optimizes for scale, isolation, or specialized workloads. Higher upfront complexity buys headroom: independent deploy units, partition tolerance, or workload-specific storage engines.</p>
-<p>Trade-off: more components to operate, monitor, and debug. Incidents require deeper runbooks and cross-team coordination.</p>` },
-    { title: `Comparison`, body: `<p>Evaluate latency (p50 and p99), consistency guarantees, operability, migration cost, and hiring pool. Payment platforms often need strong correctness on the Ledger write path with relaxed consistency on analytics and loyalty projections.</p>
-<p>Prototype both paths under realistic parallel charge load before committing — paper comparisons miss tail latency, retry storms, and reconciliation toil.</p>` },
-    { title: `Decision guide for Domain vs Integration Events`, body: `<p>Choose the simpler option that meets current SLOs. Escalate complexity only when metrics prove failure: duplicate charges, unreconciled settlements, p99 breaches during peak, or ops toil blocking feature velocity.</p>
-<p>Regardless of choice, instrument <b>Domain vs Integration Events</b> with metrics, run game-days, and keep rollback documented before any migration.</p>` },
-    { title: `Production checklist`, body: `<p>Before committing to either side of <b>Domain vs Integration Events</b>: load-test peak checkout, measure reconciliation drift, document RTO/RPO, and ensure on-call runbooks cover the failure modes each option introduces.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Domain vs Integration Events</b> changes to production:</p>
+    { title: `Two kinds of "event"`, body: `<p>"Event" is overloaded in event-driven systems. DDD distinguishes two kinds that live at different scopes and have opposite design constraints. A <b>domain event</b> records something meaningful that happened <em>within</em> a bounded context ("FundsDebited"). An <b>integration event</b> announces that fact to <em>other</em> contexts or services ("PaymentCompleted"). They look similar but must not be the same object — and understanding how it works for each keeps your internal model from leaking into your public contract.</p>` },
+    { title: `Domain events`, figureAfter: "ev", body: `<p>Domain events are internal. They are raised by an aggregate to signal a state change and consumed by handlers <em>inside the same context</em>, usually in-process.</p>
+<pre>// Domain event — rich types, never leaves the Payments context
+public record WalletDebited(
+    String walletId,
+    Money amount,
+    String paymentId,
+    Instant occurredAt
+) implements DomainEvent {}
+
+public class Wallet {  // aggregate root
+    private final List&lt;DomainEvent&gt; events = new ArrayList&lt;&gt;();
+
+    public void debit(Money amount, String paymentId) {
+        if (balance.compareTo(amount) &lt; 0) {
+            throw new InsufficientFundsException(walletId);
+        }
+        balance = balance.subtract(amount);
+        events.add(new WalletDebited(walletId, amount, paymentId, Instant.now()));
+    }
+}
+
+@Component
+public class LedgerProjectionHandler {
+    @EventListener
+    public void on(WalletDebited evt) {
+        ledgerRepo.recordDebit(evt.walletId(), evt.amount(), evt.paymentId());
+    }
+}</pre>
 <ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
+<li><b>Scope:</b> one bounded context; never leave it.</li>
+<li><b>Delivery:</b> often synchronous and in the same transaction (or immediately after commit) — an in-memory dispatcher, not a broker.</li>
+<li><b>Shape:</b> may carry rich domain types and fine-grained detail, because producer and consumers share the same model.</li>
+<li><b>Naming:</b> past tense, in the ubiquitous language — <code>OrderPlaced</code>, <code>WalletDebited</code>.</li>
 </ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Domain vs Integration Events</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<p>They decouple aggregates within a context: the Order aggregate raises <code>OrderPlaced</code> and a handler updates a read model, without the Order knowing who listens.</p>
+<pre>// Domain event: rich, in-process, same transaction boundary
+public record PaymentCaptured(
+    PaymentId paymentId,
+    PayerId payerId,
+    Money amount,
+    Instant capturedAt
+) implements DomainEvent {}
+
+@Component
+class LedgerEntryHandler {
+    @EventListener
+    public void on(PaymentCaptured event) {
+        ledger.recordCredit(event.paymentId(), event.amount()); // same context
+    }
+}</pre>` },
+    { title: `Integration events`, body: `<p>Integration events cross the boundary and are therefore a <b>published contract</b>.</p>
+<pre>// Integration event — flat DTO, versioned, published to Kafka
+public record PaymentCompletedV1(
+    String schemaVersion,   // "1.0"
+    String paymentId,
+    String walletId,
+    long amountCents,
+    String currency,
+    String status,
+    Instant completedAt
+) {}
+
+@Component
+public class PaymentIntegrationPublisher {
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void on(WalletDebited domainEvt) {
+        PaymentCompletedV1 integration = new PaymentCompletedV1(
+            "1.0",
+            domainEvt.paymentId(),
+            domainEvt.walletId(),
+            domainEvt.amount().amountMinor(),
+            domainEvt.amount().currency(),
+            "CAPTURED",
+            domainEvt.occurredAt()
+        );
+        outbox.enqueue("payments.completed", integration);
+    }
+}</pre>
+<ul>
+<li><b>Scope:</b> consumed by other services/contexts you may not control.</li>
+<li><b>Delivery:</b> asynchronous over a broker (Kafka, SNS/SQS), reliably — typically via the <b>transactional outbox</b> so publishing is atomic with the state change.</li>
+<li><b>Shape:</b> a stable, <b>versioned</b>, flat DTO of primitives and IDs — never your internal entities. Consumers depend on it, so schema evolution must be backward-compatible.</li>
+<li><b>Granularity:</b> coarser and more business-meaningful (<code>PaymentCompleted</code>), not a stream of every internal state tick.</li>
+</ul>
+<pre>// Integration event: flat DTO, versioned, crosses the boundary
+public record PaymentCompletedV1(
+    String eventType,       // "PaymentCompleted"
+    int schemaVersion,      // 1
+    String paymentId,
+    String payerId,
+    long amountMinor,
+    String currency,
+    String capturedAt       // ISO-8601 string — no Money type
+) {
+    public static PaymentCompletedV1 from(PaymentCaptured domain) {
+        return new PaymentCompletedV1(
+            "PaymentCompleted", 1,
+            domain.paymentId().value(),
+            domain.payerId().value(),
+            domain.amount().toMinorUnits(),
+            domain.amount().currency().getCurrencyCode(),
+            domain.capturedAt().toString()
+        );
+    }
+}</pre>` },
+    { title: `Why the distinction matters`, body: `<p>Publishing raw domain events across the boundary is a classic mistake: every consumer becomes coupled to your internal model, so a refactor that renames a field or splits an entity breaks other teams. The correct flow is a translation step — a handler listens to internal domain events and <em>maps</em> them into a deliberately-designed integration event that goes to the outbox and then the broker. This keeps the internal model free to change while the external contract stays stable, exactly the same reasoning as an anti-corruption layer on the inbound side. Rule of thumb: domain events are fine-grained, in-process, and disposable; integration events are coarse, durable, versioned, and treated with the same care as a public API.</p>
+<pre>// Translation handler: domain event → integration event → outbox
+@Component
+class PaymentIntegrationPublisher {
+    private final OutboxRepository outbox;
+
+    @EventListener
+    @Transactional
+    public void on(PaymentCaptured domainEvent) {
+        PaymentCompletedV1 integration = PaymentCompletedV1.from(domainEvent);
+        outbox.enqueue("payments.completed", integration); // atomic with DB commit
+    }
+}
+
+// NEVER publish PaymentCaptured directly to Kafka — consumers coupled to your model
+// ALWAYS publish PaymentCompletedV1 — stable, versioned contract</pre>` },
   ],
   figures: [
-    { id: "comparison", svg: `<svg viewBox="0 0 480 150" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Domain vs Integration Events comparison">
-<rect x="40" y="50" width="160" height="70" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="120" y="79" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Option A</text><text x="120" y="99" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">simpler / fewer parts</text>
-<rect x="280" y="50" width="160" height="70" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="360" y="79" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Option B</text><text x="360" y="99" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">scale / specialization</text>
-<text x="240" y="30" text-anchor="middle" fill="#cdd6e8" font-size="12" font-weight="600" font-family="system-ui">Domain vs Integration Events</text>
-<text x="120" y="95" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">lower ops cost</text>
-<text x="360" y="95" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">higher headroom</text>
-<text x="240" y="135" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Prototype under realistic load before choosing</text>
-</svg>`, caption: `Decision fork for Domain vs Integration Events — weigh simplicity vs scale before committing.` }
+    { id: "ev", svg: EV_SVG, caption: "A domain event stays inside the context; a handler translates it into a versioned integration event published to other contexts via a broker." },
   ],
-  related: [],
-  
-  
-  template: "flow",
-  sim: () => ({
-    note: `Explore Domain vs Integration Events in the payment platform.`,
-    toggles: [{ key: "fix", label: "Apply Domain vs Integration Events", kind: "ok", value: false }],
-    scenario(ctx) {
-      const fix = ctx.toggles.fix;
-      const actors = [
-        { id: "client", label: "Client", color: C.client },
-        { id: "order", label: "Order Service", color: C.service },
-        { id: "ledger", label: "Ledger", color: C.ledger, kind: "db", value: "balance" },
-        { id: "queue", label: "Event Queue", color: C.queue },
-      ];
-      const steps = fix ? [
-        { from: "client", to: "order", label: "pay", good: true },
-        { from: "order", to: "ledger", label: "Domain vs Integration Events ✓", good: true, set: { ledger: "committed" } },
-        { from: "ledger", to: "queue", label: "event", good: true },
-      ] : [
-        { from: "client", to: "order", label: "pay" },
-        { from: "order", to: "ledger", label: "naive write", bad: true, set: { ledger: "risk" } },
-        { from: "order", to: "queue", label: "dual write?", dashed: true, bad: true },
-      ];
-      return {
-        actors, steps, stepDur: 1.2,
-        status: (r) => !r.done ? { text: "processing…", cls: "" }
-          : fix ? { text: "Domain vs Integration Events applied", cls: "ok" } : { text: "pattern missing", cls: "err" },
-      };
-    },
-  }),
+  related: ["bounded-context", "aggregate-root", "anti-corruption-code-boundary", "transactional-outbox"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

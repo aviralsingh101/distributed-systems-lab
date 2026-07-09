@@ -1,5 +1,7 @@
 // @article-v2
+// @sim-lab
 import { sequenceSim } from "../../../sim/sequence.js";
+import { createTopicSim } from "../../../sim/lab/registry.js";
 import { C } from "../../../sim/primitives.js";
 
 export const meta = { id: "secondary-index-lag", title: "Secondary Index Lag", category: "db-scaling" };
@@ -32,70 +34,9 @@ export const content = {
 </ul>
 <p>Interview tip: whiteboard the charge flow, mark where <b>Secondary Index Lag</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
   ],
-  figures: [
-    { id: "request-path", svg: `<svg viewBox="0 0 640 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Secondary Index Lag in request path">
-<defs><marker id="fig-secondary-index-lag-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="10" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="46" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Client</text>
-<rect x="100" y="40" width="88" height="36" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="144" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Secondary Ind…</text><text x="144" y="72" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">this topic</text>
-<rect x="206" y="40" width="80" height="36" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
-<text x="246" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Order</text>
-<rect x="304" y="40" width="84" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="346" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Gateway</text>
-<rect x="406" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="442" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger</text>
-<rect x="496" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="532" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Queue</text>
-<line x1="82" y1="58" x2="98" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-secondary-index-lag-arr)"/>
-<line x1="188" y1="58" x2="204" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-secondary-index-lag-arr)"/>
-<line x1="286" y1="58" x2="302" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-secondary-index-lag-arr)"/>
-<line x1="388" y1="58" x2="404" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-secondary-index-lag-arr)"/>
-<line x1="478" y1="58" x2="494" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-secondary-index-lag-arr)"/>
-<text x="320" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">HTTPS request flow — Secondary Index Lag</text>
-</svg>`, caption: `Secondary Index Lag on the payment request path — from client charge to Ledger commit.` },
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Secondary Index Lag structure">
-<defs><marker id="fig-secondary-index-lag-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Secondary Index…</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-secondary-index-lag-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-secondary-index-lag-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-secondary-index-lag-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Secondary Index Lag — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Secondary Index Lag pattern — components and data flow in Order Service.` }
-  ],
   related: [],
 };
 
 export function createSimulation(stage, panel, stageEl) {
-  return sequenceSim(stage, panel, stageEl, {
-    note: "Write the base row, then query via the index.",
-    toggles: [{ key: "fix", label: "Read from base table (consistent)", kind: "ok", value: false }],
-    scenario(ctx) {
-      const fix = ctx.toggles.fix;
-      const actors = [
-        { id: "app", label: "App", color: C.service },
-        { id: "base", label: "Base table", color: C.ledger, kind: "db", value: "row#7" },
-        { id: "idx", label: "Index (async)", color: C.gateway, kind: "db", value: "stale" },
-      ];
-      const steps = [
-        { from: "app", to: "base", label: "write row#7", good: true, set: { base: "row#7 ✓" } },
-        fix
-          ? { from: "app", to: "base", label: "query base by pk", good: true, set: { app: "found ✓" } }
-          : { from: "app", to: "idx", label: "query by index", bad: true, set: { app: "not found!" } },
-        { from: "base", to: "idx", label: "async index update", set: { idx: "row#7" } },
-      ];
-      if (!fix) steps.push({ from: "app", to: "idx", label: "query again → found", good: true, set: { app: "found (late)" } });
-      return {
-        actors, steps, stepDur: 1.1,
-        status: (r) => !r.done ? { text: "writing then querying…", cls: "" } : { text: fix ? "base read is immediately consistent" : "index lagged — stale read window", cls: fix ? "ok" : "err" },
-      };
-    },
-  });
+  return createTopicSim("secondary-index-lag", stage, panel, stageEl);
 }

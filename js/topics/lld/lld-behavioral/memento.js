@@ -1,7 +1,29 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { stateMachineTemplate } from "../../../sim/templates/index.js";
+
+const MEM_SVG = `<svg viewBox="0 0 580 180" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Memento roles">
+  <defs><marker id="fig-memento-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
+  <rect x="20" y="60" width="150" height="60" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
+  <text x="95" y="82" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">OrderDraft</text>
+  <text x="95" y="98" text-anchor="middle" fill="#93a1bd" font-size="8" font-family="system-ui">(originator)</text>
+  <text x="95" y="112" text-anchor="middle" fill="#93a1bd" font-size="8" font-family="ui-monospace,monospace">save() / restore(m)</text>
+  <rect x="230" y="66" width="120" height="48" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
+  <text x="290" y="86" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">Memento</text>
+  <text x="290" y="101" text-anchor="middle" fill="#93a1bd" font-size="8" font-family="system-ui">opaque snapshot</text>
+  <rect x="410" y="40" width="150" height="100" rx="6" fill="#141b2c" stroke="#7c5cff" stroke-width="1.5"/>
+  <text x="485" y="60" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">History (caretaker)</text>
+  <rect x="425" y="70" width="120" height="18" rx="3" fill="#1a2236" stroke="#26324a"/>
+  <text x="485" y="83" text-anchor="middle" fill="#93a1bd" font-size="8" font-family="ui-monospace,monospace">memento #1</text>
+  <rect x="425" y="92" width="120" height="18" rx="3" fill="#1a2236" stroke="#26324a"/>
+  <text x="485" y="105" text-anchor="middle" fill="#93a1bd" font-size="8" font-family="ui-monospace,monospace">memento #2</text>
+  <rect x="425" y="114" width="120" height="18" rx="3" fill="#1a2236" stroke="#26324a"/>
+  <text x="485" y="127" text-anchor="middle" fill="#93a1bd" font-size="8" font-family="ui-monospace,monospace">memento #3 (top)</text>
+  <line x1="170" y1="90" x2="228" y2="90" stroke="#3ddc97" stroke-width="1.4" marker-end="url(#fig-memento-arr)"/>
+  <text x="199" y="82" fill="#93a1bd" font-size="8" font-family="system-ui">save</text>
+  <line x1="350" y1="90" x2="408" y2="90" stroke="#7c5cff" stroke-width="1.4" marker-end="url(#fig-memento-arr)"/>
+  <text x="379" y="82" fill="#93a1bd" font-size="8" font-family="system-ui">push</text>
+  <text x="290" y="150" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">caretaker stores mementos but never reads their contents</text>
+</svg>`;
 
 const topic = makeTopic({
   id: "memento",
@@ -10,74 +32,91 @@ const topic = makeTopic({
   track: "lld",
   tier: "essential",
   archetype: "pattern",
-  oneliner: `Capture and restore object state.`,
+  oneliner: `Snapshot an object's internal state into an opaque token so it can be restored later — without exposing that state to anyone else.`,
   sections: [
-    { title: `Motivation`, body: `<p>Capture and restore object state.</p>
-<p>Without <b>Memento</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Memento</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Memento</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Memento</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Memento</b> changes to production:</p>
+    { title: `Intent`, body: `<p><b>Memento</b> captures and externalizes an object's internal state so it can be restored later, <b>without violating encapsulation</b>. The snapshot is handed out as an opaque token: whoever holds it can give it back to restore, but cannot read or tamper with what is inside.</p>
+<p>The everyday face of this is <b>undo</b>. A multi-step order draft — add items, apply a promo, change the address — should let the user step backwards. Memento lets the draft snapshot itself before each change and roll back on demand, without leaking its private fields.</p>
+<pre>// --- Originator: creates and restores from mementos ---
+public class OrderDraft {
+    private List&lt;LineItem&gt; items = new ArrayList&lt;&gt;();
+    private String promoCode;
+    private String shippingAddress;
+
+    public Memento save() {
+        return new Memento(
+            new ArrayList&lt;&gt;(items),
+            promoCode,
+            shippingAddress
+        );
+    }
+
+    public void restore(Memento memento) {
+        this.items = new ArrayList&lt;&gt;(memento.items());
+        this.promoCode = memento.promoCode();
+        this.shippingAddress = memento.shippingAddress();
+    }
+}</pre>` },
+    { title: `Participants and structure`, figureAfter: "memento-roles", body: `<p>Three roles, and the encapsulation trick lives in their interfaces:</p>
 <ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
+<li><b>Originator</b> — <code>OrderDraft</code>. It creates a memento capturing its current state and can restore itself from one.</li>
+<li><b>Memento</b> — the opaque snapshot. It offers a <em>wide</em> interface to the originator (which reads/writes the full state) but only a <em>narrow</em>, opaque interface to everyone else.</li>
+<li><b>Caretaker</b> — the undo history. It stores mementos and decides when to restore, but never inspects their contents.</li>
 </ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Memento</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<pre>// --- Memento: opaque to outsiders, readable by originator (nested class) ---
+public class OrderDraft {
+    // … fields and save/restore as above …
+
+    // Nested memento — package-private fields, no public getters
+    public static final class Memento {
+        private final List&lt;LineItem&gt; items;
+        private final String promoCode;
+        private final String shippingAddress;
+
+        private Memento(List&lt;LineItem&gt; items, String promoCode, String shippingAddress) {
+            this.items = items;
+            this.promoCode = promoCode;
+            this.shippingAddress = shippingAddress;
+        }
+    }
+}</pre>
+<p>Because only the originator can interpret a memento, the pattern preserves the very encapsulation a naive "expose the state so someone can save it" approach would break.</p>` },
+    { title: `Implementation flow`, body: `<p>Save-before-change, restore-on-undo:</p>
+<ol>
+<li>Before a mutation, the caretaker asks the originator to snapshot: <code>history.push(draft.save())</code>.</li>
+<li>The draft mutates normally.</li>
+<li>On undo, the caretaker pops the last memento and calls <code>draft.restore(memento)</code>, which copies the saved fields back.</li>
+</ol>
+<pre>// --- Caretaker: stores mementos, never reads their contents ---
+public final class DraftHistory {
+    private final Deque&lt;OrderDraft.Memento&gt; stack = new ArrayDeque&lt;&gt;();
+    private final OrderDraft draft;
+
+    public DraftHistory(OrderDraft draft) { this.draft = draft; }
+
+    public void checkpoint() {
+        stack.push(draft.save());
+    }
+
+    public void undo() {
+        if (!stack.isEmpty()) {
+            draft.restore(stack.pop());
+        }
+    }
+}
+
+// Usage with Command pattern for undoable edits
+history.checkpoint();
+draft.applyPromo("SAVE10");
+// user clicks undo:
+history.undo();  // restores pre-promo state</pre>
+<p>Undo is frequently implemented by combining Memento with <b>Command</b>: each command captures a memento so its <code>undo()</code> can restore the prior state cleanly.</p>` },
+    { title: `Trade-offs and alternatives`, body: `<p>Memento gives clean rollback while keeping state private, but each snapshot copies (potentially deep-copies) the originator's state, so a long history of large objects is expensive in memory — and getting the deep copy right is a common bug. Consider trimming history, or using an incremental approach: instead of full snapshots, record the <em>changes</em> (command-based undo) or the sequence of events (<b>event sourcing</b>), rebuilding state by replay. Reach for full mementos when state is small or restoration must be instant.</p>` },
   ],
   figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Memento structure">
-<defs><marker id="fig-memento-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Memento</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-memento-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-memento-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-memento-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Memento — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Memento pattern — components and data flow in Order Service.` }
+    { id: "memento-roles", svg: MEM_SVG, caption: "The originator snapshots itself into an opaque memento; the caretaker keeps a history it can restore but never reads." },
   ],
-  related: [],
-  
-  
-  template: "stateMachine",
-  sim: () => ({
-    note: `Explore Memento in the payment platform.`,
-    toggles: [{ key: "fix", label: "Valid transitions only", kind: "ok", value: false }],
-    states: (ctx) => [
-      { id: "pending", label: "Pending", x: 200, y: 280, color: C.service },
-      { id: "active", label: "Memento", x: 500, y: 280, color: C.accent, good: true },
-      { id: "done", label: "Settled", x: 800, y: 280, color: C.ok, good: true },
-      { id: "bad", label: "Invalid", x: 500, y: 420, color: C.err, bad: true },
-    ],
-    currentState: (ctx, t) => {
-      if (!ctx.toggles.fix && (t % 6) > 4) return "bad";
-      return ["pending", "active", "done"][Math.floor((t * 0.35) % 3)];
-    },
-    transitions: [{ from: "pending", to: "active", label: "apply" }, { from: "active", to: "done", label: "commit" }],
-    status: (ctx) => ({ text: ctx.toggles.fix ? "state machine guards flow" : "illegal states possible", cls: ctx.toggles.fix ? "ok" : "err" }),
-  }),
+  related: ["command", "state", "temporal-tables", "optimistic-locking-schema"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

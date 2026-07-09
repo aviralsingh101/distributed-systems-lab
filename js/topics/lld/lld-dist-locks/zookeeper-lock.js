@@ -1,74 +1,97 @@
 // @article-v2
-import { mountSimulation } from "../../../sim/controls.js";
-import { C, phaseOf } from "../../../sim/primitives.js";
+// @sim-lab
+import { createTopicSim } from "../../../sim/lab/registry.js";
 
 export const meta = { id: "zookeeper-lock", title: "ZooKeeper Locks", category: "dist-lock" };
 
+const ZNODE_SVG = `<svg viewBox="0 0 720 180" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ZooKeeper sequential ephemeral znodes forming a lock queue">
+  <defs><marker id="fig-zookeeper-lock-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
+  <text x="360" y="24" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">/lock  (children ordered by sequence number)</text>
+  <rect x="40" y="60" width="150" height="52" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.8"/>
+  <text x="115" y="82" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">lock-0001</text>
+  <text x="115" y="99" text-anchor="middle" fill="#3ddc97" font-size="9" font-family="system-ui">lowest → HOLDS lock</text>
+  <rect x="240" y="60" width="150" height="52" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
+  <text x="315" y="82" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">lock-0002</text>
+  <text x="315" y="99" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">watches 0001</text>
+  <rect x="440" y="60" width="150" height="52" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
+  <text x="515" y="82" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">lock-0003</text>
+  <text x="515" y="99" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">watches 0002</text>
+  <line x1="240" y1="130" x2="180" y2="130" stroke="#5b9dff" stroke-width="1.4" marker-end="url(#fig-zookeeper-lock-arr)"/>
+  <text x="215" y="150" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">watch</text>
+  <line x1="440" y1="130" x2="380" y2="130" stroke="#7c5cff" stroke-width="1.4" marker-end="url(#fig-zookeeper-lock-arr)"/>
+  <text x="415" y="150" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">watch</text>
+  <line x1="115" y1="112" x2="315" y2="128" stroke="#93a1bd" stroke-width="0" />
+  <text x="360" y="170" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">Each waiter watches only its predecessor — no thundering herd when 0001 releases</text>
+</svg>`;
+
 export const content = {
-  oneliner: `Sequential ephemeral nodes.`,
+  oneliner: `A fair, correct distributed lock built from ZooKeeper's sequential ephemeral znodes: the lowest sequence number holds the lock, and each waiter watches only its predecessor.`,
   archetype: "pattern",
-  sections: [
-    { title: `Motivation`, body: `<p>Sequential ephemeral nodes.</p>
-<p>Without <b>ZooKeeper Locks</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>Concurrency control prevents conflicting wallet updates. Row-level locks block concurrent writers; version columns enable optimistic retry; distributed locks (Redis, etcd) coordinate cross-service critical sections with fencing tokens.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>ZooKeeper Locks</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>ZooKeeper Locks</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>ZooKeeper Locks</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>ZooKeeper Locks</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
-  ],
   figures: [
-    { id: "dist-lock", svg: `<svg viewBox="0 0 400 110" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Distributed lock">
-<rect x="40" y="38" width="70" height="36" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
-<text x="75" y="60" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Pod A</text>
-<rect x="40" y="78" width="70" height="28" rx="6" fill="#1a2236" stroke="#ff5c6c" stroke-width="1.5"/>
-<text x="75" y="86" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Pod B</text><text x="75" y="106" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">stale</text>
-<rect x="160" y="48" width="90" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="205" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Redis Lock</text><text x="205" y="82" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">token=42</text>
-<rect x="290" y="38" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="335" y="60" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger</text>
-<text x="200" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Only token holder may write</text>
-</svg>`, caption: `Distributed lock: SET key NX PX with unique token; stale holder rejected via fencing token.` }
+    { id: "zk-queue", svg: ZNODE_SVG, caption: "Contenders create sequential ephemeral children under /lock; the lowest sequence holds the lock and each other watches exactly the node just below it, turning the lock into a fair FIFO queue." },
   ],
-  related: [],
+  sections: [
+    { title: `Why ZooKeeper makes a strong lock`, body: `<p>Unlike Redis, <b>ZooKeeper</b> is a consensus system: writes go through an atomic broadcast protocol (Zab) and are committed by a majority of the ensemble before they are acknowledged. That gives it two properties a lock badly needs — a <b>linearizable</b> view of the key space and <b>ephemeral nodes</b> that vanish automatically when a client's session ends. Together they let you build a lock that is fair, avoids the thundering herd, and releases correctly when a holder crashes.</p>` },
+    { title: `Sequential ephemeral znodes`, figureAfter: "zk-queue", body: `<p>Two znode flags do the heavy lifting:</p>
+<ul>
+<li><b>Ephemeral</b> — the znode is tied to the client's session. If the client disconnects or crashes and its session times out, ZooKeeper deletes the node. This is the built-in liveness guarantee: a dead holder's lock is released without any TTL guesswork.</li>
+<li><b>Sequential</b> — when you create a child under a parent, ZooKeeper appends a monotonically increasing counter to the name (<code>lock-0001</code>, <code>lock-0002</code>, …). The counter is assigned atomically by the leader, so it also serves as a natural fencing token.</li>
+</ul>
+<p>The lock directory is simply a parent znode like <code>/lock/wallet-42</code>, and every contender creates one sequential ephemeral child inside it.</p>` },
+    { title: `The lock recipe, step by step`, body: `<ol>
+<li><b>Create</b> a sequential ephemeral child under the lock node and remember your assigned name, e.g. <code>lock-0007</code>.</li>
+<li><b>List</b> the children and sort by sequence number. If <em>yours is the lowest</em>, you hold the lock — proceed into the critical section.</li>
+<li>Otherwise, find the child with the <b>next-lower</b> sequence number and set a <b>watch</b> on <em>only that predecessor</em>. Then wait.</li>
+<li>When the predecessor's znode is deleted (it released, or its session died), your watch fires. Re-check step 2; you are now likely the lowest.</li>
+<li><b>Release</b> by deleting your own znode, which fires the watch of the node behind you.</li>
+</ol>
+<p>Watching only the immediate predecessor — not the whole directory — is the key detail: when the holder releases, exactly one waiter wakes, avoiding the "herd" of every waiter re-reading at once.</p>
+<pre>// Apache Curator: InterProcessMutex wraps the sequential-ephemeral recipe
+public final class CuratorWalletLock {
+    private final CuratorFramework client;
+
+    public CuratorWalletLock(CuratorFramework client) {
+        this.client = client;
+    }
+
+    public &lt;T&gt; T withLock(String walletId, Duration wait, Supplier&lt;T&gt; work) {
+        InterProcessMutex mutex = new InterProcessMutex(
+            client, "/lock/wallet/" + walletId);
+        boolean acquired = false;
+        try {
+            acquired = mutex.acquire(wait.toMillis(), TimeUnit.MILLISECONDS);
+            if (!acquired) throw new LockNotAcquiredException(walletId);
+            return work.get();
+        } catch (Exception e) {
+            throw new LockException(walletId, e);
+        } finally {
+            if (acquired) {
+                try { mutex.release(); } catch (Exception ignored) {}
+            }
+        }
+    }
+}
+
+// The sequence number Curator assigns is your fencing token
+public class WalletDebitService {
+    private final CuratorWalletLock lock;
+    private final LedgerService ledger;
+
+    public void debit(String walletId, Money amount, String paymentId) {
+        lock.withLock(walletId, Duration.ofSeconds(10), () -&gt; {
+            long fence = lock.currentSequence(walletId); // from znode name
+            ledger.debit(walletId, amount, paymentId, fence);
+            return null;
+        });
+    }
+}</pre>` },
+    { title: `Why this is fair and safe`, body: `<p>Because sequence numbers are assigned in order, the lock is granted <b>FIFO</b> — no starvation. Because the znode is ephemeral, a crashed holder is cleaned up by session expiry rather than an arbitrary lease timeout you have to tune. And because ZooKeeper is linearizable, all clients agree on who is lowest; there is no split-view like an async Redis failover.</p>
+<p>One subtlety remains: a holder can still be paused (GC) past its session timeout, at which point ZooKeeper expires its session and grants the lock to the next waiter while the paused process believes it holds it. The monotonic sequence number is exactly the <b>fencing token</b> to defend against this — pass it to the protected resource so a stale holder's late write is rejected.</p>` },
+    { title: `Costs and when to use`, body: `<p>ZooKeeper locks cost more than a Redis <code>SET</code>: every acquire/release is a quorum write, and you must run and operate a 3- or 5-node ensemble. Session and watch handling is fiddly enough that you should use a battle-tested recipe library (Apache Curator's <code>InterProcessMutex</code>) rather than hand-rolling it. Choose ZooKeeper (or etcd) locks when you need <b>correctness</b> — leader election, single-writer ownership of a shard — and can pair the sequence number with fencing. For pure best-effort deduplication where an occasional double-run is harmless, a Redis lock is cheaper.</p>` },
+  ],
+  related: ["etcd-lease", "fencing-tokens", "redis-lock", "redlock", "lease-expiration", "split-brain"],
 };
 
 export function createSimulation(stage, panel, stageEl) {
-  return mountSimulation(stage, panel, stageEl, {
-    note: "Lowest sequence number holds the lock; each waiter watches its predecessor.",
-    frame(ctx, t) {
-      const d = ctx.d;
-      const names = ["n-0001", "n-0002", "n-0003"];
-      const ph = phaseOf(t, [1.8, 1.8, 1.8]);
-      const holder = ph.i; // which index currently holds (others gone)
-      d.text(500, 60, "/lock/  (sequential ephemeral znodes)", { size: 13, align: "center", color: C.muted });
-      for (let i = 0; i < 3; i++) {
-        const x = 240 + i * 260, y = 200;
-        const gone = i < holder;
-        const holds = i === holder;
-        d.node(x - 80, y - 34, 160, 68, { title: names[i], color: C.gateway, state: gone ? "dim" : holds ? "ok" : "warn", active: holds, value: gone ? "released" : holds ? "HOLDS lock" : "waits" });
-        d.node(x - 60, y + 120, 120, 44, { title: "worker " + (i + 1), color: C.service, state: gone ? "dim" : "" });
-        d.arrow(x, y + 34, x, y + 120, { color: C.faint, width: 1, head: false, alpha: 0.4 });
-        if (i > 0) d.arrow(x - 80, y, (240 + (i - 1) * 260) + 80, y, { color: i === holder + 1 ? C.warn : C.faint, dashed: true, width: 1.4, label: i === holder + 1 ? "watches" : "" });
-      }
-      d.badge(500, 470, "lock held by " + names[holder] + " — no thundering herd", { color: C.ok, align: "center" });
-      ctx.setStatus("sequential handoff, one waiter woken at a time", "ok");
-    },
-  });
+  return createTopicSim("zookeeper-lock", stage, panel, stageEl);
 }

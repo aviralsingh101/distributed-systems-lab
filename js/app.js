@@ -234,14 +234,38 @@ function figureHtml(fig) {
 function articleSections(content) {
   if (!content.sections?.length) return "";
   const figs = content.figures || [];
+  const figById = Object.fromEntries(figs.map((f) => [f.id, f]));
+  const placed = new Set();
   let figIdx = 0;
-  return content.sections.map((sec, i) => {
+
+  const nextFallbackFig = () => {
+    while (figIdx < figs.length) {
+      const f = figs[figIdx++];
+      if (!placed.has(f.id)) return f;
+    }
+    return null;
+  };
+
+  const html = content.sections.map((sec, i) => {
     let figBlock = "";
-    if (figIdx < figs.length && (i === 0 || i === Math.floor(content.sections.length / 2))) {
-      figBlock = figureHtml(figs[figIdx++]);
+    if (sec.figureAfter && figById[sec.figureAfter] && !placed.has(sec.figureAfter)) {
+      placed.add(sec.figureAfter);
+      figBlock = figureHtml(figById[sec.figureAfter]);
+    } else if (!sec.figureAfter) {
+      const useFallback = i === 0 || i === Math.floor(content.sections.length / 2);
+      if (useFallback) {
+        const f = nextFallbackFig();
+        if (f) {
+          placed.add(f.id);
+          figBlock = figureHtml(f);
+        }
+      }
     }
     return `${figBlock}<section class="article-section"><h2>${sec.title}</h2><div class="prose">${sec.body}</div></section>`;
-  }).join("") + (figIdx < figs.length ? figs.slice(figIdx).map(figureHtml).join("") : "");
+  }).join("");
+
+  const remaining = figs.filter((f) => !placed.has(f.id)).map(figureHtml).join("");
+  return html + remaining;
 }
 
 function legacyContent(content) {
@@ -302,6 +326,15 @@ async function renderTopic(id) {
   const tierBadge = entry.tier === "hidden-gem" ? `<span class="tier-badge gem">Hidden gem</span>` : "";
   const trackBadge = `<span class="tier-badge track-${entry.track}">${track?.short || entry.track}</span>`;
 
+  const hasSim = typeof mod.createSimulation === "function";
+  const simHtml = hasSim ? `
+      <div class="sim-wrap">
+        <div class="sim-grid">
+          <div class="sim-stage" id="stage"></div>
+          <div class="controls" id="panel"></div>
+        </div>
+      </div>` : "";
+
   appEl.innerHTML = `
     <div class="topic">
       <div class="topic-header">
@@ -309,13 +342,7 @@ async function renderTopic(id) {
         <h1>${entry.title}</h1>
         <div class="oneliner">${content.oneliner || entry.blurb}</div>
       </div>
-
-      <div class="sim-wrap">
-        <div class="sim-grid">
-          <div class="sim-stage" id="stage"></div>
-          <div class="controls" id="panel"></div>
-        </div>
-      </div>
+${simHtml}
 
       ${renderArticleBody(content)}
 
@@ -327,13 +354,16 @@ async function renderTopic(id) {
   `;
   appEl.scrollTop = 0;
 
+  activeSim = null;
+  activeScene = null;
+  if (!hasSim) return;
+
   const stage = document.getElementById("stage");
   const panel = document.getElementById("panel");
   try {
     activeScene = new Stage(stage);
-    if (typeof mod.createSimulation === "function") {
-      activeSim = mod.createSimulation(activeScene, panel, stage);
-    }
+    activeSim = mod.createSimulation(activeScene, panel, stage);
+    if (!activeSim) activeSim = null;
   } catch (e) {
     console.error(e);
     stage.innerHTML = `<div class="loading">Diagram failed: ${(e?.message) || e}</div>`;

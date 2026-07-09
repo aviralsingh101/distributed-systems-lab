@@ -1,7 +1,28 @@
 // @article-v2
+// @sim-lab
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { flowTemplate } from "../../../sim/templates/index.js";
+import { createTopicSim } from "../../../sim/lab/registry.js";
+
+const DLQ_SVG = `<svg viewBox="0 0 720 150" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Dead-letter routing after max retries">
+  <defs><marker id="fig-dead-letter-pattern-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
+  <rect x="20" y="55" width="110" height="40" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
+  <text x="75" y="79" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">main queue</text>
+  <rect x="200" y="55" width="120" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
+  <text x="260" y="73" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">consumer</text>
+  <text x="260" y="88" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">try, retry N×</text>
+  <rect x="200" y="55" width="120" height="40" rx="6" fill="none" stroke="none"/>
+  <path d="M320 68 C 380 40, 380 40, 322 62" fill="none" stroke="#ffb454" stroke-width="1.2" marker-end="url(#fig-dead-letter-pattern-arr)"/>
+  <text x="372" y="40" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">requeue &lt; N</text>
+  <rect x="430" y="55" width="120" height="40" rx="6" fill="#1a2236" stroke="#ff6b6b" stroke-width="1.5"/>
+  <text x="490" y="73" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">DLQ</text>
+  <text x="490" y="88" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">parked, alerted</text>
+  <rect x="600" y="55" width="100" height="40" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
+  <text x="650" y="73" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">fix + replay</text>
+  <line x1="130" y1="75" x2="198" y2="75" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-dead-letter-pattern-arr)"/>
+  <line x1="320" y1="82" x2="428" y2="82" stroke="#ff6b6b" stroke-width="1.5" marker-end="url(#fig-dead-letter-pattern-arr)"/>
+  <text x="375" y="100" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">after N failures</text>
+  <line x1="550" y1="75" x2="598" y2="75" stroke="#3ddc97" stroke-width="1.5" marker-end="url(#fig-dead-letter-pattern-arr)"/>
+</svg>`;
 
 const topic = makeTopic({
   id: "dead-letter-pattern",
@@ -10,85 +31,65 @@ const topic = makeTopic({
   track: "lld",
   tier: "essential",
   archetype: "pattern",
-  oneliner: `Park failed messages for review.`,
-  sections: [
-    { title: `Motivation`, body: `<p>Park failed messages for review.</p>
-<p>Without <b>Dead Letter Pattern</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Dead Letter Pattern</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Dead Letter Pattern</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Dead Letter Pattern</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Dead Letter Pattern</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Dead Letter Pattern</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
-  ],
+  oneliner: `Route messages that repeatedly fail processing to a separate dead-letter queue so one bad message cannot block or thrash the main queue.`,
   figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Dead Letter Pattern structure">
-<defs><marker id="fig-dead-letter-pattern-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Dead Letter Pat…</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-dead-letter-pattern-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-dead-letter-pattern-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-dead-letter-pattern-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Dead Letter Pattern — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Dead Letter Pattern pattern — components and data flow in Order Service.` }
+    { id: "dlq-flow", svg: DLQ_SVG, caption: "A message is retried up to N times; once it exhausts retries it is moved to the dead-letter queue for inspection, then fixed and replayed." },
   ],
-  related: ["dead-letter-queue"],
-  
-  
-  template: "flow",
-  sim: () => ({
-    note: `Explore Dead Letter Pattern in the payment platform.`,
-    toggles: [{ key: "fix", label: "Apply Dead Letter Pattern", kind: "ok", value: false }],
-    scenario(ctx) {
-      const fix = ctx.toggles.fix;
-      const actors = [
-        { id: "client", label: "Client", color: C.client },
-        { id: "order", label: "Order Service", color: C.service },
-        { id: "ledger", label: "Ledger", color: C.ledger, kind: "db", value: "balance" },
-        { id: "queue", label: "Event Queue", color: C.queue },
-      ];
-      const steps = fix ? [
-        { from: "client", to: "order", label: "pay", good: true },
-        { from: "order", to: "ledger", label: "Dead Letter Pattern ✓", good: true, set: { ledger: "committed" } },
-        { from: "ledger", to: "queue", label: "event", good: true },
-      ] : [
-        { from: "client", to: "order", label: "pay" },
-        { from: "order", to: "ledger", label: "naive write", bad: true, set: { ledger: "risk" } },
-        { from: "order", to: "queue", label: "dual write?", dashed: true, bad: true },
-      ];
-      return {
-        actors, steps, stepDur: 1.2,
-        status: (r) => !r.done ? { text: "processing…", cls: "" }
-          : fix ? { text: "Dead Letter Pattern applied", cls: "ok" } : { text: "pattern missing", cls: "err" },
-      };
-    },
-  }),
+  sections: [
+    { title: `The problem: poison messages`, body: `<p>In an at-least-once queue, a message that the consumer can never successfully process — malformed JSON, a reference to a deleted account, a bug that throws on this payload — is a <b>poison message</b>. Naive redelivery retries it forever: it returns to the head of the queue, fails, returns again. This either blocks a strictly-ordered queue entirely or burns consumer capacity in a tight failure loop while the backlog grows.</p>
+<p>The <b>dead-letter pattern</b> breaks that loop by giving failures somewhere to go.</p>` },
+    { title: `Structure and flow`, figureAfter: "dlq-flow", body: `<p>A <b>dead-letter queue (DLQ)</b> is an ordinary queue that holds messages which could not be processed. The broker (or your consumer) moves a message there when a policy trips:</p>
+<ol>
+<li>Consumer pulls the message and attempts to process it.</li>
+<li>On failure the message is retried up to a configured <b>max-receive count</b> (usually with backoff).</li>
+<li>Once retries are exhausted, the broker redirects the message to the DLQ instead of the main queue.</li>
+<li>Operators inspect DLQ messages, fix the root cause (bad data, code bug, missing dependency), and <b>replay</b> them back onto the main queue.</li>
+</ol>
+<p>Preserve context on the way out: attach the failure reason, stack trace, attempt count, and original queue so the DLQ is debuggable rather than a graveyard of opaque blobs.</p>` },
+    { title: `Configuration and semantics`, body: `<p>SQS attaches a <b>redrive policy</b> (a DLQ + <code>maxReceiveCount</code>) to a queue; RabbitMQ uses a <code>x-dead-letter-exchange</code> that catches rejected/expired messages; Kafka has no built-in DLQ, so frameworks (Kafka Connect, Spring) publish failures to a dead-letter topic. Distinguish <b>transient</b> failures (network blip, dependency down — worth retrying) from <b>permanent</b> ones (validation error — send straight to DLQ, do not waste retries).</p>
+<p>Because the underlying delivery is still at-least-once, a message can be processed successfully and yet be seen again; idempotent handlers keep replay safe.</p>` },
+    { title: `Operating a DLQ`, body: `<p>A DLQ is only useful if someone watches it. <b>Alert on DLQ depth &gt; 0</b> — a non-empty DLQ means real messages are going undelivered (a dropped payment event, a lost receipt). Treat it as an incident signal, not a passive log.</p>
+<p>Provide a replay tool that lets operators fix data or deploy a patch and then re-inject DLQ messages after the bug is resolved. Watch for silent overflow (a DLQ that itself fills and drops) and for retry counts set so high that poison messages waste capacity for minutes before finally dead-lettering.</p>
+<pre>// --- Spring Kafka: ErrorHandlingDeserializer + DeadLetterPublishingRecoverer ---
+@Bean
+public ConcurrentKafkaListenerContainerFactory&lt;String, String&gt; kafkaListenerContainerFactory(
+        ConsumerFactory&lt;String, String&gt; cf,
+        KafkaTemplate&lt;String, String&gt; template) {
+    ConcurrentKafkaListenerContainerFactory&lt;String, String&gt; factory =
+        new ConcurrentKafkaListenerContainerFactory&lt;&gt;();
+    factory.setConsumerFactory(cf);
+    factory.setCommonErrorHandler(new DefaultErrorHandler(
+        new DeadLetterPublishingRecoverer(template,
+            (record, ex) -&gt; new TopicPartition("payment.events.dlq", -1)),
+        new FixedBackOff(1000L, 3) // 3 retries, then DLQ
+    ));
+    return factory;
+}</pre>
+<pre>@KafkaListener(topics = "payment.events", groupId = "wallet-service")
+@Transactional
+public void process(PaymentCapturedEvent event) {
+    validate(event); // permanent failure → skip retries, send to DLQ
+    inbox.dedup(event.eventId());
+    wallet.applyCredit(event);
+}
+
+// --- DLQ replay tool (operator-facing) ---
+@RestController
+public class DlqReplayController {
+    @PostMapping("/ops/dlq/replay/{messageId}")
+    public void replay(@PathVariable UUID messageId) {
+        DlqMessage msg = dlqStore.find(messageId);
+        kafka.send(msg.originalTopic(), msg.key(), msg.payload());
+        dlqStore.markReplayed(messageId);
+    }
+}</pre>` },
+  ],
+  related: ["dead-letter-queue", "work-queue", "point-to-point", "delayed-scheduled-messages", "api-idempotency"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
+
 export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
+  return createTopicSim("dead-letter-pattern", stage, panel, stageEl);
 }

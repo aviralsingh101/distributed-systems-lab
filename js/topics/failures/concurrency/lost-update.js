@@ -1,6 +1,8 @@
 // @article-v2
-import { mountSimulation } from "../../../sim/controls.js";
+// @sim-lab
+// @figure-handcrafted
 import { drawSequence } from "../../../sim/sequence.js";
+import { createTopicSim } from "../../../sim/lab/registry.js";
 import { C } from "../../../sim/primitives.js";
 
 export const meta = { id: "lost-update", title: "Lost Update", category: "concurrency" };
@@ -26,6 +28,7 @@ expected 150, actual 130 — T1's +20 is lost</pre>`,
     },
     {
       title: "The interleaving",
+      figureAfter: "timeline",
       body: `<pre>T1: SELECT balance → 100
 T2: SELECT balance → 100
 T1: UPDATE balance = 120  -- +20 refund
@@ -48,52 +51,12 @@ COMMIT both → final 130, expected 150</pre>
 <p>Hibernate <code>@Version</code> maps to HTTP 409 with retry-after. Do not catch-and-swallow conflicts.</p>`,
     },
   ],
+  figures: [
+    { id: "timeline", svg: `<svg viewBox="0 0 520 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Lost Update timeline"> <defs><marker id="fig-lost-update-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs> <text x="260" y="18" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Concurrent timeline — time flows right</text> <rect x="20" y="40" width="70" height="32" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/> <text x="55" y="60" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Worker A</text> <rect x="20" y="90" width="70" height="32" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/> <text x="55" y="110" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Worker B</text> <rect x="120" y="65" width="90" height="40" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/> <text x="165" y="79" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Shared row</text><text x="165" y="95" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">Ledger</text> <rect x="240" y="40" width="80" height="32" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/> <text x="280" y="60" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">read 100</text> <rect x="340" y="40" width="80" height="32" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/> <text x="380" y="60" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">write 120</text> <rect x="240" y="90" width="80" height="32" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/> <text x="280" y="110" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">read 100</text> <rect x="340" y="90" width="80" height="32" rx="6" fill="#1a2236" stroke="#ff5c6c" stroke-width="1.5"/> <text x="380" y="100" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">write 130</text><text x="380" y="116" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">stale!</text> <rect x="440" y="65" width="70" height="40" rx="6" fill="#1a2236" stroke="#ff5c6c" stroke-width="1.5"/> <text x="475" y="79" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">130 ✗</text><text x="475" y="95" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">lost +20</text> <line x1="90" y1="56" x2="118" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-lost-update-arr)"/> <line x1="90" y1="106" x2="118" y2="88" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-lost-update-arr)"/> <line x1="210" y1="80" x2="238" y2="56" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-lost-update-arr)"/> <line x1="210" y1="88" x2="238" y2="106" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-lost-update-arr)"/> <line x1="320" y1="56" x2="338" y2="56" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-lost-update-arr)"/> <line x1="320" y1="106" x2="338" y2="106" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-lost-update-arr)"/> <line x1="420" y1="56" x2="438" y2="78" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-lost-update-arr)"/> <line x1="420" y1="106" x2="438" y2="92" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-lost-update-arr)"/> </svg>`, caption: `Lost Update: two workers interleave read-modify-write on the same row; the second write overwrites the first.` },
+  ],
   related: ["write-skew", "optimistic", "pessimistic"],
 };
 
 export function createSimulation(stage, panel, stageEl) {
-  return mountSimulation(stage, panel, stageEl, {
-    note: "Time flows downward. Watch the Ledger's balance.",
-    params: [
-      { key: "start", label: "Starting balance", min: 0, max: 200, step: 10, value: 100, live: true },
-      { key: "a", label: "Deposit T1", min: 10, max: 80, step: 5, value: 20, live: true },
-      { key: "b", label: "Deposit T2", min: 10, max: 80, step: 5, value: 30, live: true },
-    ],
-    toggles: [{ key: "fix", label: "Apply fix (versioned atomic update)", kind: "ok", value: false }],
-    build(ctx) {
-      const { start, a, b } = ctx.params;
-      const actors = [
-        { id: "t1", label: "T1 (+" + a + ")", color: C.service, value: "" },
-        { id: "db", label: "Ledger", color: C.ledger, kind: "db", value: String(start) },
-        { id: "t2", label: "T2 (+" + b + ")", color: C.gateway, value: "" },
-      ];
-      let steps;
-      if (!ctx.toggles.fix) {
-        steps = [
-          { from: "t1", to: "db", label: "read", set: { t1: "got " + start } },
-          { from: "t2", to: "db", label: "read", set: { t2: "got " + start } },
-          { from: "t1", to: "db", label: "write " + (start + a), set: { db: String(start + a) } },
-          { from: "t2", to: "db", label: "write " + (start + b), bad: true, set: { db: String(start + b), t2: "stale!" } },
-        ];
-      } else {
-        steps = [
-          { from: "t1", to: "db", label: "read v0=" + start, set: { t1: "v0=" + start } },
-          { from: "t1", to: "db", label: "write v1=" + (start + a), good: true, set: { db: (start + a) + " (v1)" } },
-          { from: "t2", to: "db", label: "write @v0 ✕", bad: true, dashed: true, set: { t2: "conflict" } },
-          { from: "db", to: "t2", label: "re-read v1=" + (start + a), set: { t2: "got " + (start + a) } },
-          { from: "t2", to: "db", label: "write v2=" + (start + a + b), good: true, set: { db: (start + a + b) + " (v2)" } },
-        ];
-      }
-      ctx.state.spec = { actors, steps, stepDur: 1.15 };
-    },
-    frame(ctx, t, dt) {
-      const r = drawSequence(ctx.d, t, ctx.state.spec);
-      const { start, a, b } = ctx.params;
-      if (!ctx.toggles.fix) {
-        ctx.setStatus(r.done ? `balance ${start + b} — want ${start + a + b} (lost ${a})` : "interleaved read-modify-write…", r.done ? "err" : "");
-      } else {
-        ctx.setStatus(r.done ? `balance ${start + a + b} — both deposits kept` : "versioned writes…", r.done ? "ok" : "");
-      }
-    },
-  });
+  return createTopicSim("lost-update", stage, panel, stageEl);
 }

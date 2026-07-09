@@ -1,7 +1,5 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { layerTemplate } from "../../../sim/templates/index.js";
 
 const topic = makeTopic({
   id: "single-responsibility-principle",
@@ -9,69 +7,74 @@ const topic = makeTopic({
   category: "lld-oop",
   track: "lld",
   tier: "essential",
-  archetype: "pattern",
-  oneliner: `One reason to change per class.`,
+  archetype: "concept",
+  oneliner: `A module should have exactly one reason to change — it should be responsible to a single actor or stakeholder.`,
   sections: [
-    { title: `Motivation`, body: `<p>One reason to change per class.</p>
-<p>Without <b>Single Responsibility</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Single Responsibility</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Single Responsibility</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Single Responsibility</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Single Responsibility</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Single Responsibility</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+    { title: `The formal statement`, body: `<p>The <b>Single Responsibility Principle (SRP)</b>, the "S" in SOLID, is often mis-quoted as "a class should do one thing". Robert Martin's precise formulation is sharper: <em>a module should have one, and only one, reason to change</em>, where a "reason to change" means being answerable to a single <b>actor</b> — a group of people who request changes for the same business reason.</p>
+<p>So SRP is about <b>who</b> asks for changes, not how many methods a class has. A class serves finance, operations, and reporting? Those are three actors, three reasons to change, and therefore an SRP violation even if the code is small.</p>` },
+    { title: `How it works in practice — violation vs fix`, body: `<p>You apply SRP by asking, for each class, "which stakeholders drive edits here?" When two unrelated stakeholders touch the same class, their changes collide: a tweak requested by the reporting team can break logic the compliance team depends on, because they share the same file and state.</p>
+<pre>// VIOLATION: PaymentRecord serves finance AND customer-facing teams
+public class PaymentRecord {
+    private String paymentId;
+    private int amountCents;
+    private String currency;
+    private double settlementFeeRate;  // finance actor changes this
+
+    // Finance actor: fee calculation logic
+    public int computeSettlementFee() {
+        return (int) (amountCents * settlementFeeRate);
+    }
+
+    // Customer-facing actor: receipt formatting
+    public String formatReceipt() {
+        return "Receipt for " + paymentId + ": "
+            + (amountCents / 100.0) + " " + currency
+            + " (fee: " + computeSettlementFee() / 100.0 + ")";
+    }
+
+    // Compliance actor: audit export format — third reason to change!
+    public String toAuditCsv() {
+        return paymentId + "," + amountCents + "," + currency;
+    }
+}</pre>
+<p>Split along actor boundaries so each class changes only when its stakeholder asks:</p>
+<pre>// FIX: each class has one reason to change
+public record PaymentRecord(String paymentId, int amountCents, String currency) {}
+
+public class SettlementFeeCalculator {
+    private final double feeRate;
+    public SettlementFeeCalculator(double feeRate) { this.feeRate = feeRate; }
+
+    public int computeFee(PaymentRecord record) {
+        return (int) (record.amountCents() * feeRate);
+    }
+}
+
+public class ReceiptFormatter {
+    public String format(PaymentRecord record, int feeCents) {
+        return "Receipt for " + record.paymentId() + ": "
+            + (record.amountCents() / 100.0) + " " + record.currency()
+            + " (fee: " + feeCents / 100.0 + ")";
+    }
+}</pre>
+<p>When finance changes the fee formula, only <code>SettlementFeeCalculator</code> changes. When marketing wants a new receipt layout, only <code>ReceiptFormatter</code> changes. Neither can accidentally break the other.</p>` },
+    { title: `Why it reduces risk`, body: `<p>Mixing responsibilities creates <b>coupling through shared code</b>. Two teams editing one class produce merge conflicts, entangled tests, and surprise regressions. SRP localizes the blast radius: a change requested by one actor lives in one place, so it is easy to find, test in isolation, and reason about. Cohesion goes up (everything in the class serves one purpose) and accidental coupling goes down.</p>
+<pre>// Orchestrator composes single-responsibility pieces
+public class PaymentService {
+    private final SettlementFeeCalculator feeCalc;
+    private final ReceiptFormatter receiptFormatter;
+
+    public PaymentResult process(PaymentRecord record) {
+        int fee = feeCalc.computeFee(record);
+        String receipt = receiptFormatter.format(record, fee);
+        return new PaymentResult(record, fee, receipt);
+    }
+}</pre>
+<p>The orchestrator has one job: wire the workflow. Each collaborator has one job: fee math or receipt layout.</p>` },
+    { title: `Getting the granularity right`, body: `<p>SRP is easy to over-apply. Shattering a class into a dozen one-method fragments creates its own problem — the logic that belongs together is now scattered, and following a single request means hopping across files. The heuristic is the actor, not line count: keep code that changes for the same reason together, and split code that changes for different reasons apart. Related principles (cohesion, separation of concerns) point the same way at different scales.</p>` },
   ],
-  figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Single Responsibility structure">
-<defs><marker id="fig-single-responsibility-principle-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Single Responsi…</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-single-responsibility-principle-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-single-responsibility-principle-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-single-responsibility-principle-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Single Responsibility — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Single Responsibility pattern — components and data flow in Order Service.` }
-  ],
-  related: [],
-  
-  
-  template: "layer",
-  sim: () => ({
-    note: `Explore Single Responsibility in the payment platform.`,
-    toggles: [{ key: "fix", label: "Apply layering", kind: "ok", value: false }],
-    layers: (ctx) => [
-      { name: "API", components: [{ title: "REST/gRPC", active: true }] },
-      { name: "Domain", components: [{ title: "Single Responsibility", active: ctx.toggles.fix, color: C.accent }] },
-      { name: "Data", components: [{ title: "Ledger", color: C.ledger }, { title: "Queue", color: C.queue }] },
-    ],
-    status: (ctx) => ({ text: ctx.toggles.fix ? "clean separation" : "logic leaks across layers", cls: ctx.toggles.fix ? "ok" : "err" }),
-  }),
+  related: ["open-closed-principle", "interface-segregation-principle", "dry-principle", "encapsulation"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

@@ -1,7 +1,5 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { layerTemplate } from "../../../sim/templates/index.js";
 
 const topic = makeTopic({
   id: "error-contract-design",
@@ -9,74 +7,112 @@ const topic = makeTopic({
   category: "lld-api",
   track: "lld",
   tier: "essential",
-  archetype: "classic",
-  oneliner: `Stable error codes and bodies.`,
+  archetype: "pattern",
+  oneliner: `Design errors as a first-class, stable part of your API: consistent status codes, machine-readable codes, and a documented body shape clients can program against.`,
   sections: [
-    { title: `What is Error Contract Design?`, body: `<p><b>Error Contract Design</b> — Stable error codes and bodies.</p>
-<p>In Order Service code, <b>Error Contract Design</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Unlike a generic "best practice" label, it has a specific seat in the payment platform architecture with defined inputs, outputs, and failure modes.</p>` },
-    { title: `How it works`, body: `<p>At runtime, components interact in a defined order with configurable timeouts, health checks, and backoff policies. Trace a single <code>POST /v1/charge</code> with <code>X-Request-ID</code> to see where <b>Error Contract Design</b> applies.</p>
-<p>Configuration lives in infrastructure-as-code (Terraform, Helm) or edge config (nginx, Envoy, Cloudflare). Changes propagate through deploy pipelines — treat config drift as an incident precursor.</p>
-<p>Capacity planning: measure peak QPS, payload size, and fan-out before scaling horizontally. Tail latency (p99) often reveals misconfiguration before mean latency moves.</p>` },
-    { title: `In production`, body: `<p>Operate with dashboards: error rate, p99 latency, saturation, and dependency health. Runbooks cover failover, key rotation, and rollback. Game-day exercises validate that <b>Error Contract Design</b> behaves correctly during AZ failure or broker restart.</p>
-<p>Security: TLS on public paths; no PAN in application logs; audit admin APIs that change <b>Error Contract Design</b> configuration.</p>` },
-    { title: `Common mistakes`, body: `<ul>
-<li>Deploying without measuring the problem the component solves.</li>
-<li>Missing health checks — traffic routes to broken backends until manual intervention.</li>
-<li>Ignoring cache TTL and DNS caching during migrations.</li>
-<li>Operating without correlation IDs across Order → Gateway → Ledger.</li>
-</ul>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Error Contract Design</b> changes to production:</p>
+    { title: `Errors are part of the contract`, body: `<p>An API's error responses are as much a contract as its success responses — clients write code against them. Yet errors are routinely an afterthought: a 500 with an HTML stack trace here, a 200 with <code>{"error": true}</code> there, free-text messages that change between releases. <b>Error contract design</b> makes failure predictable so callers can react programmatically: retry, show a field-level validation message, refresh a token, or fail hard.</p>
+<p>The core principle: <b>the HTTP status code says what category of thing happened; a stable machine-readable code says exactly what; a human-readable message helps developers.</b> Never signal failure with a 200.</p>
+<pre>// Stable error codes — clients branch on these, not on message text
+public enum PaymentErrorCode {
+    WALLET_NOT_FOUND,
+    WALLET_INSUFFICIENT_FUNDS,
+    PAYMENT_ALREADY_CAPTURED,
+    PAYMENT_DECLINED,
+    IDEMPOTENCY_KEY_CONFLICT,
+    VALIDATION_FAILED
+}</pre>` },
+    { title: `Structure of a good error body`, body: `<p>Standardize on <b>RFC 7807 Problem Details</b> (<code>application/problem+json</code>) or a close equivalent. A well-formed error carries:</p>
 <ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
+<li><b>A correct HTTP status</b> — 4xx for client faults, 5xx for server faults (this drives caching, retries, and dashboards).</li>
+<li><b>A stable <code>code</code></b> — a machine string like <code>wallet_insufficient_funds</code> that never changes wording. Clients branch on this, not on the message.</li>
+<li><b>A human <code>message</code> / <code>detail</code></b> — for developers/logs, safe to reword.</li>
+<li><b>Field-level errors</b> for validation — an array of <code>{ field, code, message }</code> so a form can highlight the right input.</li>
+<li><b>A <code>trace_id</code> / correlation id</b> so a user can quote it and support can find the exact request in logs.</li>
 </ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Error Contract Design</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<p>Example: <code>{ "type": "...", "title": "Insufficient funds", "status": 422, "code": "wallet_insufficient_funds", "trace_id": "abc-123" }</code>.</p>
+<pre>// Global exception handler — one envelope everywhere
+@RestControllerAdvice
+public class PaymentExceptionHandler {
+
+    @ExceptionHandler(WalletNotFoundException.class)
+    public ProblemDetail handleWalletNotFound(WalletNotFoundException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+            HttpStatus.NOT_FOUND,
+            "Wallet " + ex.getWalletId() + " does not exist");
+        problem.setTitle("Wallet not found");
+        problem.setType(URI.create("https://api.example.com/errors/wallet_not_found"));
+        problem.setProperty("code", PaymentErrorCode.WALLET_NOT_FOUND.name());
+        problem.setProperty("trace_id", RequestContext.correlationId());
+        return problem;
+    }
+
+    @ExceptionHandler(InsufficientFundsException.class)
+    public ProblemDetail handleInsufficientFunds(InsufficientFundsException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "Wallet balance is " + ex.getAvailable() + ", requested " + ex.getRequested());
+        problem.setTitle("Insufficient funds");
+        problem.setType(URI.create("https://api.example.com/errors/insufficient_funds"));
+        problem.setProperty("code", PaymentErrorCode.WALLET_INSUFFICIENT_FUNDS.name());
+        problem.setProperty("trace_id", RequestContext.correlationId());
+        return problem;
+    }
+}</pre>` },
+    { title: `Choosing the right status code`, body: `<p>Map failure classes deliberately: <b>400</b> malformed request; <b>401</b> not authenticated; <b>403</b> authenticated but not allowed; <b>404</b> resource absent; <b>409</b> state conflict (charge already captured); <b>422</b> syntactically valid but business-rule failure (insufficient funds, card expired); <b>429</b> rate-limited (add <code>Retry-After</code>); <b>5xx</b> server-side.</p>
+<p>This split is operational, not cosmetic: the caller retries <b>5xx, 429, and timeouts</b> with backoff but must <b>not</b> retry a 4xx (retrying a 422 will just fail again and may double-submit). Getting the code wrong — returning 500 for a validation error, or 200 for a decline — breaks every client's retry logic.</p>
+<pre>@ExceptionHandler(PaymentAlreadyCapturedException.class)
+public ProblemDetail handleAlreadyCaptured(PaymentAlreadyCapturedException ex) {
+    // 409 Conflict — state clash, not a server fault
+    ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+        HttpStatus.CONFLICT,
+        "Payment " + ex.getPaymentId() + " is already captured");
+    problem.setProperty("code", PaymentErrorCode.PAYMENT_ALREADY_CAPTURED.name());
+    return problem;
+}
+
+@ExceptionHandler(GatewayUnavailableException.class)
+public ProblemDetail handleGatewayDown(GatewayUnavailableException ex) {
+    // 503 — retryable server-side fault
+    ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "Payment processor temporarily unavailable");
+    problem.setProperty("code", "gateway_unavailable");
+    problem.setProperty("retryable", true);
+    return problem;
+}</pre>` },
+    { title: `Consistency, security, and evolution`, body: `<p>Apply the same shape <b>everywhere</b> — one error envelope across all endpoints and services (enforce it in a shared middleware / exception handler, not per-controller). Treat error codes like an enum you version: add new codes freely, but don't repurpose an existing one.</p>
+<p><b>Don't leak internals</b>: never return stack traces, SQL, or PAN/PII in error bodies on public APIs; log the detail server-side keyed by <code>trace_id</code> and return a generic message. A disciplined error contract turns "the API returned an error" into an actionable, testable, secure behavior.</p>
+<pre>// Validation errors — field-level detail for forms
+@ExceptionHandler(MethodArgumentNotValidException.class)
+public ProblemDetail handleValidation(MethodArgumentNotValidException ex) {
+    ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.BAD_REQUEST);
+    problem.setTitle("Validation failed");
+    problem.setProperty("code", PaymentErrorCode.VALIDATION_FAILED.name());
+
+    List&lt;Map&lt;String, String&gt;&gt; fieldErrors = ex.getBindingResult()
+        .getFieldErrors().stream()
+        .map(fe -&gt; Map.of(
+            "field", fe.getField(),
+            "code", fe.getCode(),
+            "message", fe.getDefaultMessage()))
+        .toList();
+    problem.setProperty("errors", fieldErrors);
+    return problem;
+}
+
+// Security: log detail server-side, return generic message to client
+@ExceptionHandler(Exception.class)
+public ProblemDetail handleUnexpected(Exception ex) {
+    String traceId = RequestContext.correlationId();
+    log.error("unhandled error trace_id={}", traceId, ex);
+    ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.INTERNAL_SERVER_ERROR);
+    problem.setDetail("An unexpected error occurred. Reference: " + traceId);
+    problem.setProperty("trace_id", traceId);
+    return problem;
+}</pre>` },
   ],
-  figures: [
-    { id: "request-path", svg: `<svg viewBox="0 0 640 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Error Contract Design in request path">
-<defs><marker id="fig-error-contract-design-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="10" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="46" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Client</text>
-<rect x="100" y="40" width="88" height="36" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="144" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Error Contrac…</text><text x="144" y="72" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">this topic</text>
-<rect x="206" y="40" width="80" height="36" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
-<text x="246" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Order</text>
-<rect x="304" y="40" width="84" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="346" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Gateway</text>
-<rect x="406" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="442" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger</text>
-<rect x="496" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="532" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Queue</text>
-<line x1="82" y1="58" x2="98" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-error-contract-design-arr)"/>
-<line x1="188" y1="58" x2="204" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-error-contract-design-arr)"/>
-<line x1="286" y1="58" x2="302" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-error-contract-design-arr)"/>
-<line x1="388" y1="58" x2="404" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-error-contract-design-arr)"/>
-<line x1="478" y1="58" x2="494" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-error-contract-design-arr)"/>
-<text x="320" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">HTTPS request flow — Error Contract Design</text>
-</svg>`, caption: `Error Contract Design on the payment request path — from client charge to Ledger commit.` }
-  ],
-  related: [],
-  
-  
-  template: "layer",
-  sim: () => ({
-    note: `Explore Error Contract Design in the payment platform.`,
-    toggles: [{ key: "fix", label: "Apply layering", kind: "ok", value: false }],
-    layers: (ctx) => [
-      { name: "API", components: [{ title: "REST/gRPC", active: true }] },
-      { name: "Domain", components: [{ title: "Error Contract Design", active: ctx.toggles.fix, color: C.accent }] },
-      { name: "Data", components: [{ title: "Ledger", color: C.ledger }, { title: "Queue", color: C.queue }] },
-    ],
-    status: (ctx) => ({ text: ctx.toggles.fix ? "clean separation" : "logic leaks across layers", cls: ctx.toggles.fix ? "ok" : "err" }),
-  }),
+  related: ["rest-resource-modeling", "correlation-trace-ids", "api-idempotency", "api-versioning-strategies", "grpc-service-design"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

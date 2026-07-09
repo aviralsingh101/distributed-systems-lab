@@ -34,7 +34,7 @@ for (const t of samples) {
   try {
     const modUrl = new URL(`../js/${t.module.replace(/^\.\//, "")}`, import.meta.url).href;
     const m = await import(modUrl);
-    if (!m.meta || !m.content || !m.createSimulation) {
+    if (!m.meta || !m.content) {
       console.error("INCOMPLETE EXPORTS:", t.id);
       errors++;
     }
@@ -45,4 +45,45 @@ for (const t of samples) {
 }
 
 if (errors) { console.error(`\n${errors} error(s)`); process.exit(1); }
+
+try {
+  const figUrl = new URL("./verify-figures.mjs", import.meta.url).href;
+  await import(figUrl);
+} catch (e) {
+  console.error("FIGURE VERIFY FAIL:", e.message);
+  process.exit(1);
+}
+
+try {
+  const simQUrl = new URL("./verify-sim-quality.mjs", import.meta.url).href;
+  await import(simQUrl);
+} catch (e) {
+  console.error("SIM QUALITY FAIL:", e.message);
+  process.exit(1);
+}
+
+try {
+  const simBehUrl = new URL("./verify-sim-behavior.mjs", import.meta.url).href;
+  await import(simBehUrl);
+} catch (e) {
+  console.error("SIM BEHAVIOR FAIL:", e.message);
+  process.exit(1);
+}
+
+try {
+  const contentMapUrl = new URL("./verify-content-map.mjs", import.meta.url).href;
+  await import(contentMapUrl);
+} catch (e) {
+  console.error("CONTENT MAP VERIFY FAIL:", e.message);
+  process.exit(1);
+}
+
+try {
+  const simLayoutUrl = new URL("./verify-sim-layout.mjs", import.meta.url).href;
+  await import(simLayoutUrl);
+} catch (e) {
+  console.error("SIM LAYOUT FAIL:", e.message);
+  process.exit(1);
+}
+
 console.log("All checks passed.");

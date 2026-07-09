@@ -1,7 +1,27 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { flowTemplate } from "../../../sim/templates/index.js";
+
+const SKEL_SVG = `<svg viewBox="0 0 560 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Template method skeleton">
+  <defs><marker id="fig-template-method-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
+  <rect x="30" y="20" width="230" height="170" rx="8" fill="#141b2c" stroke="#5b9dff" stroke-width="1.5"/>
+  <text x="145" y="40" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">PaymentProcessor.process()</text>
+  <rect x="55" y="52" width="180" height="24" rx="4" fill="#1a2236" stroke="#9aa7c7" stroke-width="1"/>
+  <text x="145" y="68" text-anchor="middle" fill="#cdd6e8" font-size="9" font-family="ui-monospace,monospace">validate()  [fixed]</text>
+  <rect x="55" y="82" width="180" height="24" rx="4" fill="#1a2236" stroke="#3ddc97" stroke-width="1.2"/>
+  <text x="145" y="98" text-anchor="middle" fill="#cdd6e8" font-size="9" font-family="ui-monospace,monospace">authorize()  [abstract]</text>
+  <rect x="55" y="112" width="180" height="24" rx="4" fill="#1a2236" stroke="#3ddc97" stroke-width="1.2"/>
+  <text x="145" y="128" text-anchor="middle" fill="#cdd6e8" font-size="9" font-family="ui-monospace,monospace">capture()  [abstract]</text>
+  <rect x="55" y="142" width="180" height="24" rx="4" fill="#1a2236" stroke="#9aa7c7" stroke-width="1"/>
+  <text x="145" y="158" text-anchor="middle" fill="#cdd6e8" font-size="9" font-family="ui-monospace,monospace">record() + notify()  [fixed]</text>
+  <rect x="340" y="40" width="190" height="52" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.4"/>
+  <text x="435" y="62" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">CardProcessor</text>
+  <text x="435" y="78" text-anchor="middle" fill="#93a1bd" font-size="8" font-family="system-ui">overrides authorize/capture</text>
+  <rect x="340" y="120" width="190" height="52" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.4"/>
+  <text x="435" y="142" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">WalletProcessor</text>
+  <text x="435" y="158" text-anchor="middle" fill="#93a1bd" font-size="8" font-family="system-ui">overrides authorize/capture</text>
+  <line x1="340" y1="66" x2="262" y2="94" stroke="#7c5cff" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#fig-template-method-arr)"/>
+  <line x1="340" y1="146" x2="262" y2="124" stroke="#7c5cff" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#fig-template-method-arr)"/>
+</svg>`;
 
 const topic = makeTopic({
   id: "template-method",
@@ -10,85 +30,91 @@ const topic = makeTopic({
   track: "lld",
   tier: "essential",
   archetype: "pattern",
-  oneliner: `Skeleton algorithm, subclass steps.`,
+  oneliner: `Fix the skeleton of an algorithm in a base method and let subclasses fill in the steps that vary — without changing the overall sequence.`,
   sections: [
-    { title: `Motivation`, body: `<p>Skeleton algorithm, subclass steps.</p>
-<p>Without <b>Template Method</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Template Method</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Template Method</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Template Method</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Template Method</b> changes to production:</p>
+    { title: `Intent`, body: `<p><b>Template Method</b> defines the skeleton of an algorithm in one method, deferring some steps to subclasses. Subclasses redefine those steps without changing the algorithm's structure or order.</p>
+<p>The invariant here is the <em>sequence</em>. Every payment must be validated, then authorized, then captured, then recorded and notified — in that order. What differs between a card, a wallet, and a bank transfer is only <em>how</em> authorize and capture work, not the overall flow. Template Method locks the flow in the base class and opens just the steps that vary.</p>
+<pre>// --- Abstract class: fixes the algorithm skeleton ---
+public abstract class PaymentProcessor {
+    // Template method — final so subclasses cannot reorder steps
+    public final ChargeResult process(Payment payment) {
+        validate(payment);
+        Authorization auth = authorize(payment);
+        CaptureResult capture = capture(payment, auth);
+        record(payment, capture);
+        notify(payment, capture);
+        return capture.toChargeResult();
+    }
+
+    private void validate(Payment payment) { /* fixed */ }
+    protected abstract Authorization authorize(Payment payment);
+    protected abstract CaptureResult capture(Payment payment, Authorization auth);
+    private void record(Payment payment, CaptureResult result) { /* fixed */ }
+    private void notify(Payment payment, CaptureResult result) { /* fixed */ }
+}</pre>` },
+    { title: `Participants and structure`, figureAfter: "template-skeleton", body: `<p>Two roles, connected by inheritance:</p>
 <ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
+<li><b>Abstract Class</b> — <code>PaymentProcessor</code>. Its <b>template method</b> <code>process()</code> is <code>final</code>-ish: it calls the steps in order. Some steps are concrete (<code>validate</code>, <code>record</code>), some are abstract <b>primitive operations</b> (<code>authorize</code>, <code>capture</code>), and some are optional <b>hooks</b> with default no-op behaviour.</li>
+<li><b>Concrete Classes</b> — <code>CardProcessor</code>, <code>WalletProcessor</code>, override only the primitive operations.</li>
 </ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Template Method</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<p>This is the <b>Hollywood Principle</b>: "don't call us, we'll call you." The base class calls down into the subclass's steps, not the other way around — control is inverted.</p>
+<pre>public final class CardProcessor extends PaymentProcessor {
+    private final PaymentGateway gateway;
+
+    public CardProcessor(PaymentGateway gateway) { this.gateway = gateway; }
+
+    @Override
+    protected Authorization authorize(Payment payment) {
+        return gateway.authorize(payment.toAuthRequest());
+    }
+
+    @Override
+    protected CaptureResult capture(Payment payment, Authorization auth) {
+        return gateway.capture(auth.id(), payment.amount());
+    }
+}</pre>` },
+    { title: `Implementation flow`, body: `<p>The subclass never runs the sequence itself:</p>
+<ol>
+<li>Client calls <code>cardProcessor.process(payment)</code> — defined only in the base class.</li>
+<li><code>process()</code> runs <code>validate()</code>, then calls the abstract <code>authorize()</code>, which dispatches to <code>CardProcessor.authorize()</code>.</li>
+<li>It continues through <code>capture()</code>, then the fixed <code>record()</code> and <code>notify()</code> steps.</li>
+</ol>
+<pre>public final class WalletProcessor extends PaymentProcessor {
+    private final WalletService wallet;
+
+    public WalletProcessor(WalletService wallet) { this.wallet = wallet; }
+
+    @Override
+    protected Authorization authorize(Payment payment) {
+        wallet.reserve(payment.walletId(), payment.amount());
+        return Authorization.reserved(payment.id());
+    }
+
+    @Override
+    protected CaptureResult capture(Payment payment, Authorization auth) {
+        wallet.debit(payment.walletId(), payment.amount());
+        return CaptureResult.captured(payment.id());
+    }
+}
+
+// Client — never calls authorize/capture directly
+ChargeResult result = cardProcessor.process(payment);</pre>
+<p>A subclass cannot reorder or skip steps; it can only fill in the designated holes, which is exactly the guarantee you want for a regulated flow.</p>` },
+    { title: `Template Method vs Strategy`, body: `<p>Both let an algorithm vary, but through opposite mechanisms. <b>Template Method</b> uses <em>inheritance</em>: variation is chosen at compile time by subclassing, and the whole algorithm shares one base skeleton. <b>Strategy</b> uses <em>composition</em>: variation is a pluggable object swapped at <em>runtime</em>, and each strategy is a complete standalone algorithm.</p>
+<pre>// Template Method: subclass overrides steps (compile-time, inheritance)
+CardProcessor processor = new CardProcessor(gateway);
+processor.process(payment);
+
+// Strategy: inject algorithm object (runtime, composition)
+router.setStrategy(new CheapestRouting());
+router.route(payment, gateways);</pre>
+<p>Template Method's reuse of the invariant skeleton is its strength, but it inherits inheritance's problems: rigid class hierarchies, the fragile base class, and no runtime reconfiguration. When the varying steps are truly independent or need to change at runtime, prefer Strategy (composition over inheritance).</p>` },
   ],
   figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Template Method structure">
-<defs><marker id="fig-template-method-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Template Method</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-template-method-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-template-method-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-template-method-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Template Method — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Template Method pattern — components and data flow in Order Service.` }
+    { id: "template-skeleton", svg: SKEL_SVG, caption: "The base class fixes the order and the surrounding steps; subclasses override only authorize() and capture()." },
   ],
-  related: [],
-  
-  
-  template: "flow",
-  sim: () => ({
-    note: `Explore Template Method in the payment platform.`,
-    toggles: [{ key: "fix", label: "Apply Template Method", kind: "ok", value: false }],
-    scenario(ctx) {
-      const fix = ctx.toggles.fix;
-      const actors = [
-        { id: "client", label: "Client", color: C.client },
-        { id: "order", label: "Order Service", color: C.service },
-        { id: "ledger", label: "Ledger", color: C.ledger, kind: "db", value: "balance" },
-        { id: "queue", label: "Event Queue", color: C.queue },
-      ];
-      const steps = fix ? [
-        { from: "client", to: "order", label: "pay", good: true },
-        { from: "order", to: "ledger", label: "Template Method ✓", good: true, set: { ledger: "committed" } },
-        { from: "ledger", to: "queue", label: "event", good: true },
-      ] : [
-        { from: "client", to: "order", label: "pay" },
-        { from: "order", to: "ledger", label: "naive write", bad: true, set: { ledger: "risk" } },
-        { from: "order", to: "queue", label: "dual write?", dashed: true, bad: true },
-      ];
-      return {
-        actors, steps, stepDur: 1.2,
-        status: (r) => !r.done ? { text: "processing…", cls: "" }
-          : fix ? { text: "Template Method applied", cls: "ok" } : { text: "pattern missing", cls: "err" },
-      };
-    },
-  }),
+  related: ["strategy", "factory-method", "state", "command"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

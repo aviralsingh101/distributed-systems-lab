@@ -1,78 +1,65 @@
 // @article-v2
-import { sequenceSim } from "../../../sim/sequence.js";
-import { C } from "../../../sim/primitives.js";
+// @sim-lab
+import { createTopicSim } from "../../../sim/lab/registry.js";
 
 export const meta = { id: "pessimistic", title: "Pessimistic Concurrency", category: "opt-pess" };
 
 export const content = {
-  oneliner: `SELECT ... FOR UPDATE.`,
-  archetype: "pattern",
+  oneliner: `Assume conflicts are likely: lock the row before you touch it with SELECT ... FOR UPDATE, so concurrent writers wait their turn.`,
+  archetype: "concept",
   sections: [
-    { title: `Motivation`, body: `<p>SELECT ... FOR UPDATE.</p>
-<p>Without <b>Pessimistic Concurrency</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>Concurrency control prevents conflicting wallet updates. Row-level locks block concurrent writers; version columns enable optimistic retry; distributed locks (Redis, etcd) coordinate cross-service critical sections with fencing tokens.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Pessimistic Concurrency</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Pessimistic Concurrency</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Pessimistic Concurrency</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Pessimistic Concurrency</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+    { title: `The core idea`, body: `<p><b>Pessimistic concurrency control</b> assumes contention is common, so it prevents conflicts instead of detecting them. Before a transaction modifies a row, it <b>acquires a lock</b> on that row; any other transaction that wants to write (or lock) it must <b>wait</b> until the first commits or rolls back and releases the lock. Conflicts are serialized away up front rather than caught at commit.</p>
+<p>Here is how it works: acquiring the lock creates a critical section around the row, so the read-modify-write sequence runs to completion with no one else interleaving on that row.</p>` },
+    { title: `SELECT ... FOR UPDATE`, body: `<p>The workhorse is a locking read inside a transaction. <code>SELECT ... FOR UPDATE</code> reads the row <em>and</em> takes an exclusive row lock held until the transaction ends:</p>
+<p><code>BEGIN; SELECT balance FROM wallet WHERE id = :id FOR UPDATE; -- others block here UPDATE wallet SET balance = balance - :amt WHERE id = :id; COMMIT;</code></p>
+<p>Between the <code>FOR UPDATE</code> and the <code>COMMIT</code>, any other transaction issuing <code>FOR UPDATE</code> on that wallet blocks. This eliminates the lost update by construction — there is no window in which two transactions both read the same balance and both write. Related modes: <code>FOR SHARE</code> takes a shared lock (many readers, no writer), and <code>FOR UPDATE SKIP LOCKED</code> / <code>NOWAIT</code> control what happens when the row is already locked (skip it, or fail immediately) — the basis of safe SQL work queues.</p>
+<pre>@Entity
+@Table(name = "wallets")
+public class Wallet {
+    @Id private String id;
+    private long balanceCents;
+}
+
+public interface WalletRepository extends JpaRepository&lt;Wallet, String&gt; {
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT w FROM Wallet w WHERE w.id = :id")
+    Optional&lt;Wallet&gt; findByIdForUpdate(@Param("id") String id);
+}
+
+@Service
+public class PessimisticWalletService {
+    private final WalletRepository repo;
+
+    @Transactional
+    public void debit(String walletId, long amountCents, String paymentId) {
+        Wallet w = repo.findByIdForUpdate(walletId)
+            .orElseThrow(() -&gt; new WalletNotFoundException(walletId));
+
+        if (w.getBalanceCents() &lt; amountCents) {
+            throw new InsufficientFundsException(walletId);
+        }
+        w.setBalanceCents(w.getBalanceCents() - amountCents);
+        // lock held until commit — no other writer can interleave
+        repo.save(w);
+    }
+
+    @Transactional
+    public void transfer(String from, String to, long amountCents) {
+        // Lock in consistent order to avoid deadlock
+        List&lt;String&gt; ids = Stream.of(from, to).sorted().toList();
+        Wallet first = repo.findByIdForUpdate(ids.get(0)).orElseThrow();
+        Wallet second = repo.findByIdForUpdate(ids.get(1)).orElseThrow();
+        first.setBalanceCents(first.getBalanceCents() - amountCents);
+        second.setBalanceCents(second.getBalanceCents() + amountCents);
+    }
+}</pre>` },
+    { title: `Blocking, timeouts, and deadlocks`, body: `<p>Locks introduce their own failure modes. A slow lock holder makes everyone behind it wait, so set a <b>lock/statement timeout</b> so waiters fail fast instead of piling up and exhausting the connection pool. The classic hazard is <b>deadlock</b>: transaction A locks row 1 then wants row 2, while B locks row 2 then wants row 1 — each waits forever. Databases detect the cycle and kill one victim with a deadlock error. Prevent it by <b>acquiring locks in a consistent order</b> (always lock wallets by ascending id), keeping transactions short, and locking the minimum set of rows.</p>` },
+    { title: `When to use it`, body: `<p>Pessimistic locking is the right default under <b>high contention</b> on the same row — a hot wallet, inventory of a flash-sale item, a shared counter — where optimistic retries would thrash. It gives predictable, first-come-first-served behavior and guarantees the writer sees and mutates current state.</p>
+<p>Its costs are reduced concurrency (writers on the same row serialize), the risk of deadlocks, and the danger of holding a lock across slow work. Two hard rules: never hold a row lock across an external network call (a Gateway request) — you will stall every other writer; and always lock the true point of contention, not a broad range, or you serialize unrelated work. When contention is actually low, <b>optimistic</b> concurrency gives more throughput for the same correctness; <b>hybrid</b> strategies switch between the two by measured contention.</p>` },
   ],
-  figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Pessimistic Concurrency structure">
-<defs><marker id="fig-pessimistic-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Pessimistic Con…</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-pessimistic-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-pessimistic-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-pessimistic-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Pessimistic Concurrency — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Pessimistic Concurrency pattern — components and data flow in Order Service.` }
-  ],
-  related: [],
+  related: ["optimistic", "hybrid", "optimistic-locking-schema", "transactional-boundaries"],
 };
 
 export function createSimulation(stage, panel, stageEl) {
-  return sequenceSim(stage, panel, stageEl, {
-    note: "SELECT … FOR UPDATE — the second writer waits.",
-    scenario(ctx) {
-      const actors = [
-        { id: "w1", label: "Writer 1", color: C.service },
-        { id: "db", label: "Wallet", color: C.ledger, kind: "db", value: "100 · free" },
-        { id: "w2", label: "Writer 2", color: C.gateway },
-      ];
-      const steps = [
-        { from: "w1", to: "db", label: "SELECT…FOR UPDATE (lock)", good: true, set: { db: "100 · locked", w1: "holds lock" } },
-        { from: "w2", to: "db", label: "FOR UPDATE — waits", dashed: true, set: { w2: "blocked" } },
-        { from: "w1", to: "db", label: "balance +20 → commit", good: true, set: { db: "120 · free", w1: "done" } },
-        { from: "w2", to: "db", label: "acquires lock, reads 120", set: { db: "120 · locked", w2: "holds lock" } },
-        { from: "w2", to: "db", label: "balance +30 → commit", good: true, set: { db: "150 · free", w2: "done" } },
-      ];
-      return {
-        actors, steps, stepDur: 1.1,
-        status: (r) => !r.done ? { text: "serialized by the lock…", cls: "" } : { text: "balance 150 — correct, no retries", cls: "ok" },
-      };
-    },
-  });
+  return createTopicSim("pessimistic", stage, panel, stageEl);
 }

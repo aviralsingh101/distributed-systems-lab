@@ -1,96 +1,107 @@
 // @article-v2
-import { mountSimulation } from "../../../sim/controls.js";
-import { C, withAlpha } from "../../../sim/primitives.js";
+// @sim-lab
+import { createTopicSim } from "../../../sim/lab/registry.js";
 
 export const meta = { id: "isolation-levels", title: "Isolation Levels", category: "transactions" };
 
 export const content = {
-  oneliner: `What each level prevents.`,
-  archetype: "pattern",
+  oneliner: `Weaker isolation trades correctness for throughput — each level is defined by exactly which read anomalies it still permits.`,
+  archetype: "concept",
   sections: [
-    { title: `Motivation`, body: `<p>What each level prevents.</p>
-<p>Without <b>Isolation Levels</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>Distributed transactions split into local ACID commits plus compensating actions. Outbox pattern atomically writes business row and event intent; saga orchestrator tracks forward steps and compensation handlers per failed step.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Isolation Levels</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Isolation Levels</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Isolation Levels</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
+    { title: `Why levels exist`, body: `<p>Perfect isolation (<b>serializability</b>) makes concurrent transactions behave as if run one at a time, but enforcing it costs locking and aborts. The SQL standard therefore defines weaker <b>isolation levels</b>, each specified not by how it is implemented but by which <b>read phenomena (anomalies)</b> it forbids. To choose a level you first have to know the three anomalies precisely.</p>
+<pre>import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
+
+// Spring maps isolation levels to JDBC connection settings
+@Transactional(isolation = Isolation.READ_COMMITTED)      // default on PostgreSQL
+public WalletBalance getBalance(String walletId) { ... }
+
+@Transactional(isolation = Isolation.REPEATABLE_READ)    // snapshot for transaction duration
+public List&lt;LedgerEntry&gt; reconcile(String walletId) { ... }
+
+@Transactional(isolation = Isolation.SERIALIZABLE)       // strongest — prevents write skew
+public void chargeWallet(ChargeCommand cmd) { ... }</pre>` },
+    { title: `The three anomalies`, body: `<ul>
+<li><b>Dirty read</b> — T1 reads a row that T2 has written but not yet committed. If T2 later rolls back, T1 acted on data that never officially existed. Example: reading a wallet balance mid-way through another charge that then aborts.</li>
+<li><b>Non-repeatable read</b> — T1 reads a row, T2 <em>updates that same row</em> and commits, and T1 reads it again within the same transaction and sees a different value. The single row's value is not stable across the transaction.</li>
+<li><b>Phantom read</b> — T1 runs a query over a <em>range</em> (e.g. "all pending charges &gt; $100"), T2 <em>inserts or deletes</em> a row matching that predicate and commits, and T1 re-runs the query and sees a different <em>set</em> of rows. The anomaly is about rows appearing/disappearing, not a single row changing.</li>
 </ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Isolation Levels</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<pre>// DIRTY READ demo — only possible at READ_UNCOMMITTED (avoid in production)
+@Transactional(isolation = Isolation.READ_UNCOMMITTED)
+public long readBalanceUnsafe(String walletId) {
+    // sees uncommitted debits from another in-flight transaction
+    return walletRepo.findBalance(walletId);
+}
+
+// Transaction A: debits 5000, then rolls back
+@Transactional
+public void failedCharge(String walletId) {
+    walletRepo.debit(walletId, 5000);
+    throw new PaymentDeclinedException();  // rollback — debit never happened
+}
+
+// Transaction B at READ_UNCOMMITTED briefly saw balance - 5000 — dirty read</pre>` },
+    { title: `The levels and what each prevents`, body: `<p>Each stronger level forbids one more anomaly:</p>
+<table>
+<tr><td><b>Level</b></td><td><b>Dirty read</b></td><td><b>Non-repeatable</b></td><td><b>Phantom</b></td></tr>
+<tr><td>Read Uncommitted</td><td>possible</td><td>possible</td><td>possible</td></tr>
+<tr><td>Read Committed</td><td>prevented</td><td>possible</td><td>possible</td></tr>
+<tr><td>Repeatable Read</td><td>prevented</td><td>prevented</td><td>possible*</td></tr>
+<tr><td>Serializable</td><td>prevented</td><td>prevented</td><td>prevented</td></tr>
+</table>
+<p>*ANSI permits phantoms at repeatable read; some engines (MySQL InnoDB via next-key locks) prevent them there anyway. Read committed is the common default (PostgreSQL, Oracle, SQL Server).</p>
+<pre>// READ COMMITTED — safe for dashboards, prevents dirty reads
+@Transactional(isolation = Isolation.READ_COMMITTED, readOnly = true)
+public PaymentSummary getPaymentSummary(String paymentId) {
+    return paymentRepo.findSummary(paymentId);
+}
+
+// REPEATABLE READ — balance stable for entire reconciliation pass
+@Transactional(isolation = Isolation.REPEATABLE_READ)
+public ReconciliationReport reconcileWallet(String walletId) {
+    long openingBalance = walletRepo.findBalance(walletId);
+    List&lt;LedgerEntry&gt; entries = ledgerRepo.findByWallet(walletId);
+    long closingBalance = walletRepo.findBalance(walletId);
+    // openingBalance unchanged even if another txn committed mid-pass
+    return new ReconciliationReport(openingBalance, entries, closingBalance);
+}</pre>` },
+    { title: `How engines implement it`, body: `<p>Two families of mechanism. <b>Lock-based</b> (traditional 2-phase locking) takes shared locks for reads and exclusive locks for writes; longer-held read locks buy stronger levels, and range/gap locks kill phantoms at serializable. <b>MVCC / snapshot isolation</b> (PostgreSQL, InnoDB) works by giving each transaction a consistent <b>snapshot</b> as of its start, so reads never block writes — repeatable-read-like behaviour comes free from the snapshot, and PostgreSQL's <b>Serializable Snapshot Isolation (SSI)</b> adds runtime conflict detection to catch the write-skew anomaly that plain snapshot isolation misses.</p>
+<pre>// Explicit row lock at READ COMMITTED — alternative to SERIALIZABLE
+@Transactional(isolation = Isolation.READ_COMMITTED)
+public void chargeWithRowLock(ChargeCommand cmd) {
+    Wallet wallet = walletRepo.findByIdForUpdate(cmd.walletId()).orElseThrow();
+    // SELECT ... FOR UPDATE holds exclusive lock until commit
+    if (wallet.balanceCents() &lt; cmd.amountCents()) {
+        throw new InsufficientFundsException(cmd.walletId());
+    }
+    walletRepo.debit(cmd.walletId(), cmd.amountCents());
+}</pre>
+<p>Note that snapshot isolation is <em>not</em> identical to serializable: it prevents dirty, non-repeatable, and phantom reads but still allows <b>write skew</b> (two transactions each read an overlapping set, then write disjoint rows, jointly breaking an invariant neither saw violated).</p>` },
+    { title: `Choosing a level`, body: `<p>Match the level to the invariant's cost of being wrong. Analytics and dashboards tolerate read committed. A <b>money-moving path</b> — checking a wallet balance and then debiting it — needs protection against lost updates and write skew, so use serializable (or explicit <code>SELECT ... FOR UPDATE</code> row locks at read committed) on that transaction, and reserve the expensive level for just those statements.</p>
+<pre>@Service
+public class PaymentIsolationPolicy {
+
+    @Transactional(isolation = Isolation.READ_COMMITTED, readOnly = true)
+    public List&lt;Payment&gt; listRecentPayments(String walletId) {
+        return paymentRepo.findRecent(walletId, 50);
+    }
+
+    @Transactional(isolation = Isolation.SERIALIZABLE)
+    public void capturePayment(CaptureCommand cmd) {
+        Payment payment = paymentRepo.findByIdForUpdate(cmd.paymentId()).orElseThrow();
+        Wallet wallet = walletRepo.findByIdForUpdate(cmd.walletId()).orElseThrow();
+        if (wallet.balanceCents() &lt; cmd.amountCents()) {
+            throw new InsufficientFundsException(cmd.walletId());
+        }
+        walletRepo.debit(cmd.walletId(), cmd.amountCents());
+        paymentRepo.markCaptured(cmd.paymentId());
+    }
+}</pre>
+<p>Raising the level reduces anomalies but increases lock contention and serialization-failure retries, so measure conflict/abort rates after changing it rather than defaulting everything to serializable.</p>` },
   ],
-  figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Isolation Levels structure">
-<defs><marker id="fig-isolation-levels-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Isolation Levels</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-isolation-levels-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-isolation-levels-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-isolation-levels-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Isolation Levels — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Isolation Levels pattern — components and data flow in Order Service.` }
-  ],
-  related: [],
+  related: ["acid", "optimistic", "pessimistic", "transactional-boundaries"],
 };
 
 export function createSimulation(stage, panel, stageEl) {
-  const levels = ["Read Uncommitted", "Read Committed", "Repeatable Read", "Serializable"];
-  const cols = ["Dirty Read", "Non-repeatable", "Phantom", "Write Skew"];
-  // true = prevented
-  const table = {
-    "Read Uncommitted": [false, false, false, false],
-    "Read Committed": [true, false, false, false],
-    "Repeatable Read": [true, true, false, false],
-    "Serializable": [true, true, true, true],
-  };
-  return mountSimulation(stage, panel, stageEl, {
-    note: "Green = anomaly prevented · Red = still possible.",
-    selects: [{ key: "level", label: "Isolation level", value: "Read Committed", options: levels.map((l) => ({ value: l, label: l })) }],
-    frame(ctx) {
-      const d = ctx.d;
-      const sel = ctx.selects.level;
-      const x0 = 240, y0 = 120, cw = 150, rh = 74, labelW = x0;
-      // column headers
-      cols.forEach((c, j) => d.text(x0 + j * cw + cw / 2, y0 - 22, c, { size: 12, align: "center", color: C.muted }));
-      levels.forEach((lv, i) => {
-        const y = y0 + i * rh;
-        const active = lv === sel;
-        // row label
-        d.node(20, y + 6, labelW - 40, rh - 16, { title: lv, color: C.accent, state: active ? "" : "dim", active });
-        table[lv].forEach((prevented, j) => {
-          const cx = x0 + j * cw, cy = y + 6, w = cw - 14, h = rh - 16;
-          const col = prevented ? C.ok : C.err;
-          d.ctx.save();
-          d.ctx.globalAlpha = active ? 1 : 0.35;
-          d._rr(cx, cy, w, h, 10);
-          d.ctx.fillStyle = withAlpha(col, active ? 0.18 : 0.08); d.ctx.fill();
-          d.ctx.strokeStyle = withAlpha(col, active ? 0.7 : 0.3); d.ctx.lineWidth = 1.4; d.ctx.stroke();
-          d.ctx.restore();
-          d.text(cx + w / 2, cy + h / 2, prevented ? "✓ safe" : "✕ possible", { size: 13, align: "center", weight: 700, color: col, alpha: active ? 1 : 0.5 });
-        });
-      });
-      const strength = levels.indexOf(sel) + 1;
-      ctx.setStatus(`${sel}: prevents ${table[sel].filter(Boolean).length}/4 anomalies`, strength >= 3 ? "ok" : strength === 1 ? "err" : "warn");
-    },
-  });
+  return createTopicSim("isolation-levels", stage, panel, stageEl);
 }

@@ -1,0 +1,9 @@
+export { mountLab } from "./mountLab.js";
+export { createDomOverlay } from "./domOverlay.js";
+export { metricsLab } from "./templates/metricsLab.js";
+export { raceLab } from "./templates/raceLab.js";
+export { queueProcessorLab } from "./templates/queueProcessorLab.js";
+export { clickFlowLab } from "./templates/clickFlowLab.js";
+export { stateExplorerLab } from "./templates/stateExplorerLab.js";
+export { algorithmLab } from "./templates/algorithmLab.js";
+export { architectureLab } from "./templates/architectureLab.js";

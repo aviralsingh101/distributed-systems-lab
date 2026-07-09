@@ -1,89 +1,60 @@
 // @article-v2
-import { sequenceSim } from "../../../sim/sequence.js";
-import { C } from "../../../sim/primitives.js";
+// @sim-lab
+import { createTopicSim } from "../../../sim/lab/registry.js";
 
 export const meta = { id: "tcc", title: "TCC (Try / Confirm / Cancel)", category: "transactions" };
 
+const FLOW_SVG = `<svg viewBox="0 0 720 170" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Try-Confirm-Cancel flow">
+  <defs><marker id="fig-tcc-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
+  <rect x="20" y="65" width="120" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
+  <text x="80" y="82" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Try</text>
+  <text x="80" y="97" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">reserve / hold</text>
+  <rect x="300" y="20" width="150" height="40" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
+  <text x="375" y="37" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Confirm</text>
+  <text x="375" y="52" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">use reservation (all Try ok)</text>
+  <rect x="300" y="110" width="150" height="40" rx="6" fill="#1a2236" stroke="#ff6b6b" stroke-width="1.5"/>
+  <text x="375" y="127" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Cancel</text>
+  <text x="375" y="142" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">release reservation (any Try failed)</text>
+  <line x1="140" y1="78" x2="298" y2="45" stroke="#3ddc97" stroke-width="1.5" marker-end="url(#fig-tcc-arr)"/>
+  <line x1="140" y1="92" x2="298" y2="125" stroke="#ff6b6b" stroke-width="1.5" marker-end="url(#fig-tcc-arr)"/>
+  <text x="560" y="82" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Each op is idempotent;</text>
+  <text x="560" y="98" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">reservation gives isolation.</text>
+</svg>`;
+
 export const content = {
-  oneliner: `Try / Confirm / Cancel.`,
+  oneliner: `A business-layer distributed transaction: every service exposes Try, Confirm, and Cancel so a coordinator can reserve resources first and commit or release them together.`,
   archetype: "pattern",
-  sections: [
-    { title: `Motivation`, body: `<p>Try / Confirm / Cancel.</p>
-<p>Without <b>TCC</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>Distributed transactions split into local ACID commits plus compensating actions. Outbox pattern atomically writes business row and event intent; saga orchestrator tracks forward steps and compensation handlers per failed step.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>TCC</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>TCC</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>TCC</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>TCC</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
-  ],
   figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="TCC structure">
-<defs><marker id="fig-tcc-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">TCC</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-tcc-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-tcc-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-tcc-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">TCC — class and integration boundaries</text>
-</svg>`, caption: `Structure of the TCC pattern — components and data flow in Order Service.` }
+    { id: "tcc-flow", svg: FLOW_SVG, caption: "Try reserves on every service; if all succeed the coordinator Confirms all, otherwise it Cancels all." },
   ],
-  related: [],
+  sections: [
+    { title: `The idea`, body: `<p><b>TCC (Try-Confirm-Cancel)</b> implements a distributed transaction at the <em>application</em> layer instead of the database layer. Each participating service exposes three explicit operations for a business action, and a coordinator invokes them in two rounds — much like 2PC, but the "prepare" is a real business reservation and the rollback is a compensating call, not a database undo.</p>
+<p>It fits money movement well: a payment that must debit a Wallet, charge through a Gateway, and credit a Ledger — all owned by different services — commits as a unit or not at all, without holding database locks across the network.</p>` },
+    { title: `The three operations`, figureAfter: "tcc-flow", body: `<ul>
+<li><b>Try</b> — validate business rules and <b>reserve</b> the resources needed, without applying the final effect. For a wallet debit, Try does not remove money; it moves the amount into a <em>frozen / held</em> balance so no other transaction can spend it.</li>
+<li><b>Confirm</b> — perform the real effect using only what Try reserved (turn the hold into an actual debit). Confirm must not re-check business rules — Try already guaranteed feasibility — and it must be idempotent.</li>
+<li><b>Cancel</b> — release the reservation made by Try (unfreeze the held funds). Also idempotent.</li>
+</ul>
+<pre>public interface TccParticipant {
+    // Phase 1: reserve, validate rules, DO NOT apply the final effect
+    Reservation tryReserve(TxnId txn, Money amount);
+    // Phase 2a: turn the hold into the real effect (idempotent)
+    void confirm(TxnId txn);
+    // Phase 2b: release the hold (idempotent)
+    void cancel(TxnId txn);
+}</pre>` },
+    { title: `Coordinator flow`, body: `<p>The structure of the orchestration mirrors 2PC's two phases:</p>
+<ol>
+<li><b>Try phase.</b> The coordinator calls <code>Try</code> on every service. Each success returns a reservation the service will honor for a bounded time.</li>
+<li><b>Confirm or Cancel phase.</b> If <em>all</em> Try calls succeeded, the coordinator calls <code>Confirm</code> on all services. If <em>any</em> Try failed or timed out, it calls <code>Cancel</code> on all services that were tried.</li>
+</ol>
+<p>The coordinator persists its decision and retries Confirm/Cancel until every service acknowledges, because those calls can fail transiently.</p>` },
+    { title: `Why reservations beat a plain saga`, body: `<p>A plain choreographed <b>saga</b> applies each step for real and compensates afterward, so between steps other transactions can observe and act on half-finished state (a classic isolation anomaly — someone spends money that a later step will claw back). TCC's Try holds resources instead of applying them, giving you a reservation-based form of isolation without database-level distributed locks. Compared to <b>2PC</b>, TCC never leaves a database in-doubt holding row locks, so it scales across services and datacenters.</p>` },
+    { title: `Hard parts to get right`, body: `<p>TCC pushes real complexity onto developers. Every operation must be <b>idempotent</b> because retries are unavoidable. You must handle two ordering hazards: the <b>empty confirm/cancel</b> (a Cancel arrives for a Try that was never received or already timed out — record it so a late Try is rejected) and the <b>hanging Try</b> (a delayed Try arrives after its Cancel — it must become a no-op). Reservations need timeouts so a crashed coordinator does not freeze funds forever, and you need a recovery job that reconciles reservations left dangling. Use TCC when you need cross-service atomicity with isolation and are willing to write and test all three paths per action.</p>` },
+  ],
+  related: ["saga", "two-pc", "three-pc", "idempotency-key", "transactional-outbox"],
 };
 
 export function createSimulation(stage, panel, stageEl) {
-  return sequenceSim(stage, panel, stageEl, {
-    note: "Try reserves; then Confirm all or Cancel all.",
-    toggles: [{ key: "fail", label: "Inventory Try fails", kind: "warn", value: false }],
-    scenario(ctx) {
-      const fail = ctx.toggles.fail;
-      const actors = [
-        { id: "w", label: "Wallet", color: C.ledger, kind: "db", value: "100 free" },
-        { id: "c", label: "Coordinator", color: C.accent },
-        { id: "inv", label: "Inventory", color: C.gateway, kind: "db", value: "10 free" },
-      ];
-      let steps = [
-        { from: "c", to: "w", label: "Try: freeze 40", good: true, set: { w: "60 +40 held" } },
-      ];
-      if (!fail) {
-        steps.push(
-          { from: "c", to: "inv", label: "Try: hold 1", good: true, set: { inv: "9 +1 held" } },
-          { from: "c", to: "w", label: "Confirm", good: true, set: { w: "60 (final)" } },
-          { from: "c", to: "inv", label: "Confirm", good: true, set: { inv: "9 (final)" } },
-        );
-      } else {
-        steps.push(
-          { from: "c", to: "inv", label: "Try: hold 1 ✕", bad: true, set: { inv: "out of stock" } },
-          { from: "c", to: "w", label: "Cancel: release hold", bad: true, set: { w: "100 free" } },
-        );
-      }
-      return {
-        actors, steps, stepDur: 1.05,
-        status: (r) => !r.done ? { text: "phase: Try…", cls: "" }
-          : fail ? { text: "Try failed → all holds cancelled", cls: "ok" } : { text: "all Confirmed — reservations made permanent", cls: "ok" },
-      };
-    },
-  });
+  return createTopicSim("tcc", stage, panel, stageEl);
 }

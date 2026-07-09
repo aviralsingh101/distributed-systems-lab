@@ -1,7 +1,7 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { topologyTemplate } from "../../../sim/templates/index.js";
+
+const AMB_SVG = `<svg viewBox="0 0 540 140" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Ambassador proxy for outbound calls"><defs><marker id="fig-ambassador-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs><rect x="20" y="50" width="100" height="44" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/><text x="70" y="70" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">App</text><text x="70" y="85" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">calls localhost</text><rect x="160" y="50" width="120" height="44" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/><text x="220" y="68" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">Ambassador</text><text x="220" y="83" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">retry&#183;TLS&#183;breaker</text><rect x="330" y="30" width="180" height="34" rx="6" fill="#1a2236" stroke="#ff8fab" stroke-width="1.5"/><text x="420" y="52" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">Payment Gateway (remote)</text><rect x="330" y="80" width="180" height="34" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/><text x="420" y="102" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">3rd-party API (remote)</text><line x1="120" y1="72" x2="158" y2="72" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-ambassador-arr)"/><line x1="280" y1="66" x2="328" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-ambassador-arr)"/><line x1="280" y1="78" x2="328" y2="96" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-ambassador-arr)"/><text x="270" y="128" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">app makes a plain call; the ambassador owns the hard network semantics</text></svg>`;
 
 const topic = makeTopic({
   id: "ambassador",
@@ -10,77 +10,82 @@ const topic = makeTopic({
   track: "lld",
   tier: "essential",
   archetype: "pattern",
-  oneliner: `Proxy outbound calls from app.`,
+  oneliner: "A co-located proxy that owns the hard parts of an application's outbound network calls — retries, TLS, timeouts, discovery — so the app can call plain localhost.",
   sections: [
-    { title: `Motivation`, body: `<p>Proxy outbound calls from app.</p>
-<p>Without <b>Ambassador</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Ambassador</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Ambassador</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Ambassador</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Ambassador</b> changes to production:</p>
+    {
+      title: "The problem: resilient remote calls, duplicated everywhere",
+      body: `<p>Whenever a service calls a remote dependency — the Payment Gateway, a third-party API, a sharded datastore — it needs timeouts, retries with backoff, circuit breaking, TLS, and endpoint discovery. Implementing all of that correctly inside every app, in every language, is repetitive and error-prone. Legacy clients often cannot be modified to add it at all.</p>
+<p>The <b>ambassador</b> pattern moves this outbound-connection logic into a helper proxy that runs beside the app. The app makes a simple local call; the ambassador makes the resilient remote one.</p>`,
+    },
+    {
+      title: "Structure",
+      figureAfter: "amb-flow",
+      body: `<p>The ambassador is a specialized <b>sidecar</b> dedicated to outbound traffic:</p>
 <ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
+<li>The app is configured to send its remote requests to <code>localhost:PORT</code> instead of the real endpoint.</li>
+<li>The ambassador receives them and forwards to the actual dependency, applying retries, timeouts, circuit breaking, TLS termination/origination, load balancing, and service discovery.</li>
+<li>Responses (and failures translated into clean errors) flow back over localhost.</li>
 </ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Ambassador</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<p>The app's networking code shrinks to "call localhost"; all the resilience policy lives in one reusable, independently-upgradable component.</p>
+<pre>// --- App: calls localhost; ambassador owns outbound resilience ---
+@Configuration
+public class GatewayClientConfig {
+    @Bean
+    RestClient paymentGatewayClient() {
+        return RestClient.builder()
+            .baseUrl("http://127.0.0.1:15001") // ambassador sidecar
+            .build();
+    }
+}
+
+@Service
+public class ChargeService {
+    private final RestClient gateway;
+
+    public ChargeResult charge(ChargeRequest req) {
+        return gateway.post()
+            .uri("/v1/charge")
+            .header("Idempotency-Key", req.paymentId())
+            .body(req)
+            .retrieve()
+            .body(ChargeResult.class);
+    }
+}</pre>
+<pre>// --- Ambassador sidecar config (Envoy cluster snippet) ---
+// clusters:
+//   - name: payment_gateway
+//     connect_timeout: 2s
+//     type: STRICT_DNS
+//     lb_policy: ROUND_ROBIN
+//     circuit_breakers:
+//       thresholds: [{ max_retries: 3 }]
+//     transport_socket: { name: envoy.transport_sockets.tls }
+// Retries, TLS, and circuit breaking live here — not in Java.</pre>`,
+    },
+    {
+      title: "Implementation flow",
+      body: `<ol>
+<li>App issues <code>GET http://localhost:15001/charge</code>.</li>
+<li>Ambassador resolves the real Gateway endpoint (from discovery/config), opens a TLS connection, and forwards the request.</li>
+<li>On a timeout or 5xx it retries with exponential backoff against a healthy instance; repeated failures trip its circuit breaker and it fast-fails locally.</li>
+<li>It records latency/error metrics and returns the result to the app.</li>
+</ol>`,
+    },
+    {
+      title: "Ambassador vs sidecar vs proxy",
+      body: `<p>An ambassador <em>is</em> a sidecar, narrowed to the app's <b>outbound</b> calls (client-side proxy). A general sidecar can handle any concern including inbound traffic and logging. A <b>service mesh</b> data plane is essentially ambassador + inbound-sidecar combined and managed centrally. Compared with an API gateway (a shared edge component for <em>inbound</em> traffic from outside), the ambassador is per-instance and outbound.</p>`,
+    },
+    {
+      title: "Tradeoffs",
+      body: `<p><b>Pros:</b> resilient outbound calls with no app changes and in any language; consolidates and standardizes retry/timeout/TLS policy; ideal for modernizing legacy clients you cannot touch.</p>
+<p><b>Cons:</b> an extra hop and process per instance (latency and resource cost); one more thing to deploy and monitor; a misconfigured ambassador (e.g. retries stacking on top of app retries) can amplify load. <b>Use when</b> many services need consistent, resilient egress or you must add resilience without editing clients; <b>avoid</b> when a single service can use a good client library and the overhead is not justified.</p>`,
+    },
   ],
   figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Ambassador structure">
-<defs><marker id="fig-ambassador-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ambassador</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-ambassador-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-ambassador-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-ambassador-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Ambassador — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Ambassador pattern — components and data flow in Order Service.` }
+    { id: "amb-flow", svg: AMB_SVG, caption: "Ambassador: the app calls localhost; the co-located proxy handles retries, TLS, discovery, and circuit breaking for outbound remote calls." },
   ],
-  related: [],
-  
-  
-  template: "topology",
-  sim: () => ({
-    note: `Explore Ambassador in the payment platform.`,
-    toggles: [{ key: "fix", label: "Apply Ambassador", kind: "ok", value: false }],
-    nodes: (ctx) => [
-      { id: "c", x: 160, y: 280, title: "Client", color: C.client },
-      { id: "o", x: 400, y: 200, title: "Order", color: C.service, active: true },
-      { id: "g", x: 640, y: 280, title: "Gateway", color: C.gateway },
-      { id: "l", x: 500, y: 400, title: "Ledger", color: C.ledger, value: ctx.toggles.fix ? "ok" : "?" },
-      { id: "q", x: 840, y: 200, title: "Queue", color: C.queue },
-    ],
-    edges: (ctx) => [
-      { from: "c", to: "o", active: true },
-      { from: "o", to: "g", active: ctx.toggles.fix },
-      { from: "g", to: "l", active: ctx.toggles.fix },
-      { from: "l", to: "q", active: ctx.toggles.fix, label: "Ambassador" },
-    ],
-    activeEdge: (ctx, t) => ctx.toggles.fix ? { from: "l", to: "q" } : { from: "c", to: "o" },
-    status: (ctx) => ({ text: ctx.toggles.fix ? "Ambassador in path" : "pattern absent", cls: ctx.toggles.fix ? "ok" : "warn" }),
-  }),
+  related: ["sidecar", "circuit-breaker", "request-reply"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

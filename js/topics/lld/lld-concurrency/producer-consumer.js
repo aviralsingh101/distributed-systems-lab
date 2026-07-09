@@ -1,7 +1,23 @@
 // @article-v2
+// @sim-lab
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { pipelineTemplate } from "../../../sim/templates/index.js";
+import { createTopicSim } from "../../../sim/lab/registry.js";
+
+const PC_SVG = `<svg viewBox="0 0 720 170" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Producer consumer bounded buffer">
+  <defs><marker id="fig-producer-consumer-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
+  <rect x="30" y="55" width="120" height="30" rx="5" fill="#1a2236" stroke="#5b9dff" stroke-width="1.4"/><text x="90" y="75" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">producer A</text>
+  <rect x="30" y="95" width="120" height="30" rx="5" fill="#1a2236" stroke="#5b9dff" stroke-width="1.4"/><text x="90" y="115" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">producer B</text>
+  <rect x="260" y="60" width="200" height="60" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.6"/>
+  <text x="360" y="82" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">bounded buffer (cap = 4)</text>
+  <text x="360" y="102" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">[ x ][ x ][ x ][ &nbsp; ]</text>
+  <rect x="570" y="55" width="120" height="30" rx="5" fill="#1a2236" stroke="#3ddc97" stroke-width="1.4"/><text x="630" y="75" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">consumer 1</text>
+  <rect x="570" y="95" width="120" height="30" rx="5" fill="#1a2236" stroke="#3ddc97" stroke-width="1.4"/><text x="630" y="115" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">consumer 2</text>
+  <line x1="150" y1="70" x2="258" y2="80" stroke="#5b9dff" stroke-width="1.4" marker-end="url(#fig-producer-consumer-arr)"/>
+  <line x1="150" y1="110" x2="258" y2="100" stroke="#5b9dff" stroke-width="1.4" marker-end="url(#fig-producer-consumer-arr)"/>
+  <line x1="460" y1="80" x2="568" y2="70" stroke="#3ddc97" stroke-width="1.4" marker-end="url(#fig-producer-consumer-arr)"/>
+  <line x1="460" y1="100" x2="568" y2="110" stroke="#3ddc97" stroke-width="1.4" marker-end="url(#fig-producer-consumer-arr)"/>
+  <text x="360" y="145" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">full → producers block · empty → consumers block</text>
+</svg>`;
 
 const topic = makeTopic({
   id: "producer-consumer",
@@ -10,71 +26,77 @@ const topic = makeTopic({
   track: "lld",
   tier: "essential",
   archetype: "pattern",
-  oneliner: `Queue decouples rates.`,
+  oneliner: `A bounded queue between producers and consumers decouples their rates and applies backpressure when the two sides drift apart.`,
   sections: [
-    { title: `Motivation`, body: `<p>Queue decouples rates.</p>
-<p>Without <b>Producer-Consumer</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Producer-Consumer</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Producer-Consumer</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Producer-Consumer</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Producer-Consumer</b> changes to production:</p>
+    { title: `The rate-mismatch problem`, body: `<p>Producers and consumers rarely run at the same speed, and their speeds vary over time. If producers outrun consumers with no buffer, either producers block on every hand-off or work piles up without bound. The <b>producer-consumer</b> pattern puts a <b>bounded buffer</b> (a thread-safe queue) between them: producers <code>put</code> items, consumers <code>take</code> them, and neither needs to know how many of the other exist or how fast they run.</p>` },
+    { title: `Structure and the blocking contract`, figureAfter: "pc", body: `<p>The core is a queue plus two synchronization conditions:</p>
 <ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
+<li>When the buffer is <b>full</b>, <code>put</code> blocks until a consumer frees a slot. This is <b>backpressure</b> — it slows fast producers to the consumer rate instead of exhausting memory.</li>
+<li>When the buffer is <b>empty</b>, <code>take</code> blocks until a producer adds an item, so idle consumers do not busy-spin.</li>
 </ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Producer-Consumer</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<p>Classically this is implemented with a mutex and two condition variables (<code>notFull</code>, <code>notEmpty</code>). A waiting thread releases the lock while parked and re-checks its condition in a <code>while</code> loop on wake-up (never an <code>if</code>) to guard against spurious wake-ups and lost wake-ups. Most languages ship a ready-made <code>BlockingQueue</code> / channel that encapsulates this correctly.</p>
+<pre>// Payment webhook events: HTTP producers, settlement consumers
+public final class PaymentEventPipeline {
+    private final BlockingQueue&lt;PaymentEvent&gt; buffer =
+        new ArrayBlockingQueue&lt;&gt;(256);  // bounded — backpressure on producers
+
+    public void publish(PaymentEvent event) throws InterruptedException {
+        buffer.put(event);   // blocks when full
+    }
+
+    public PaymentEvent consume() throws InterruptedException {
+        return buffer.take(); // blocks when empty
+    }
+}
+
+// Producer: webhook controller enqueues, returns 202 immediately
+@RestController
+class WebhookController {
+    private final PaymentEventPipeline pipeline;
+    @PostMapping("/webhooks/stripe")
+    public ResponseEntity&lt;Void&gt; onEvent(@RequestBody StripePayload payload)
+            throws InterruptedException {
+        pipeline.publish(PaymentEvent.fromStripe(payload));
+        return ResponseEntity.accepted().build();
+    }
+}
+
+// Consumer: worker thread drains and settles
+void runSettlementWorker() {
+    while (running) {
+        PaymentEvent event = pipeline.consume();
+        settlementService.apply(event);
+    }
+}</pre>` },
+    { title: `Why bounded matters`, body: `<p>An <b>unbounded</b> queue removes backpressure: a producer burst is absorbed silently, latency grows as the backlog deepens, and a sustained overload ends in an out-of-memory crash rather than a graceful slowdown. A <b>bounded</b> queue converts overload into an explicit signal — producers block (or the enqueue is rejected) — which propagates pressure back up the pipeline where it can be handled: shed load, scale out consumers, or return "busy" to the caller.</p>` },
+    { title: `Correctness and shutdown`, body: `<p>Watch for the <b>lost-wakeup</b> bug (signalling before the waiter has registered) — condition-variable predicates re-checked in a loop avoid it. For shutdown, use a <b>poison pill</b> (a sentinel item that tells a consumer to exit) or an explicit "closed" flag so consumers drain the remaining items and then stop, rather than blocking forever on an empty queue. In distributed form this same pattern becomes a message broker: the topic is the bounded buffer, and consumer-lag metrics are the queue depth you monitor.</p>
+<pre>public record PaymentEvent(String paymentId, Money amount, EventType type) {}
+public enum EventType { CAPTURED, REFUNDED, POISON }
+
+// Graceful shutdown: poison pill per consumer
+public void shutdown(List&lt;Thread&gt; consumers) throws InterruptedException {
+    for (int i = 0; i &lt; consumers.size(); i++) {
+        buffer.put(new PaymentEvent("shutdown", Money.ZERO, EventType.POISON));
+    }
+    for (Thread t : consumers) t.join();
+}
+
+// Consumer loop
+while (true) {
+    PaymentEvent event = buffer.take();
+    if (event.type() == EventType.POISON) break;
+    ledgerService.record(event);
+}</pre>` },
   ],
   figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Producer-Consumer structure">
-<defs><marker id="fig-producer-consumer-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Producer-Consum…</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-producer-consumer-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-producer-consumer-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-producer-consumer-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Producer-Consumer — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Producer-Consumer pattern — components and data flow in Order Service.` }
+    { id: "pc", svg: PC_SVG, caption: "A fixed-capacity buffer decouples producers from consumers; a full buffer blocks producers, an empty one blocks consumers." },
   ],
-  related: [],
-  
-  
-  template: "pipeline",
-  sim: () => ({
-    note: `Explore Producer-Consumer in the payment platform.`,
-    toggles: [{ key: "fix", label: "Enable Producer-Consumer", kind: "ok", value: false }],
-    stages: (ctx) => [
-      { title: "Client", color: C.client },
-      { title: "Order", color: C.service },
-      { title: "Producer-Consumer", color: ctx.toggles.fix ? C.ok : C.warn },
-      { title: "Ledger", color: C.ledger },
-      { title: "Queue", color: C.queue },
-    ],
-    activeIndex: (ctx, t) => ctx.toggles.fix ? Math.min(4, Math.floor(t * 0.6) % 5) : Math.min(2, Math.floor(t * 0.6) % 3),
-    status: (ctx) => ({ text: ctx.toggles.fix ? "pipeline complete" : "bottleneck mid-pipeline", cls: ctx.toggles.fix ? "ok" : "warn" }),
-  }),
+  related: ["thread-pool", "reactive-streams", "readers-writers", "message-queue"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
+
 export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
+  return createTopicSim("producer-consumer", stage, panel, stageEl);
 }

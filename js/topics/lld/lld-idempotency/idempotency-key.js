@@ -1,83 +1,137 @@
 // @article-v2
-import { sequenceSim } from "../../../sim/sequence.js";
-import { C } from "../../../sim/primitives.js";
+// @sim-lab
+import { createTopicSim } from "../../../sim/lab/registry.js";
 
 export const meta = { id: "idempotency-key", title: "Idempotency-Key", category: "idempotency" };
 
+const KEY_SVG = `<svg viewBox="0 0 720 180" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Idempotency key store returning the saved result on a retry">
+  <defs><marker id="fig-idempotency-key-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
+  <rect x="20" y="30" width="140" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
+  <text x="90" y="48" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">Request #1</text>
+  <text x="90" y="63" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">Key: abc-123</text>
+  <rect x="20" y="112" width="140" height="40" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
+  <text x="90" y="130" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">Retry (same key)</text>
+  <text x="90" y="145" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">Key: abc-123</text>
+  <rect x="290" y="70" width="180" height="44" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.8"/>
+  <text x="380" y="90" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">Idempotency store</text>
+  <text x="380" y="105" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">abc-123 → charge #778, 200</text>
+  <line x1="160" y1="50" x2="288" y2="82" stroke="#3ddc97" stroke-width="1.4" marker-end="url(#fig-idempotency-key-arr)"/>
+  <text x="225" y="58" text-anchor="middle" fill="#3ddc97" font-size="9" font-family="system-ui">insert → charge once</text>
+  <line x1="160" y1="132" x2="288" y2="104" stroke="#5b9dff" stroke-width="1.4" marker-end="url(#fig-idempotency-key-arr)"/>
+  <text x="225" y="140" text-anchor="middle" fill="#5b9dff" font-size="9" font-family="system-ui">hit → replay saved result</text>
+  <rect x="560" y="70" width="140" height="44" rx="6" fill="#1a2236" stroke="#ff6b6b" stroke-width="1.4"/>
+  <text x="630" y="90" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">Wallet</text>
+  <text x="630" y="105" text-anchor="middle" fill="#3ddc97" font-size="9" font-family="system-ui">debited exactly once</text>
+  <line x1="470" y1="92" x2="558" y2="92" stroke="#93a1bd" stroke-width="1.2" marker-end="url(#fig-idempotency-key-arr)"/>
+</svg>`;
+
 export const content = {
-  oneliner: `Dedup by client key.`,
+  oneliner: `A client-supplied unique key on a write request that lets the server detect and collapse retries, so a re-sent charge executes exactly once and returns the original result.`,
   archetype: "pattern",
-  sections: [
-    { title: `Motivation`, body: `<p>Dedup by client key.</p>
-<p>Without <b>Idempotency-Key</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Idempotency-Key</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Idempotency-Key</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Idempotency-Key</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Idempotency-Key</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Idempotency-Key</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
-  ],
   figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Idempotency-Key structure">
-<defs><marker id="fig-idempotency-key-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Idempotency-Key</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-idempotency-key-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-idempotency-key-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-idempotency-key-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Idempotency-Key — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Idempotency-Key pattern — components and data flow in Order Service.` }
+    { id: "idem-key-flow", svg: KEY_SVG, caption: "The first request with key abc-123 performs the charge and stores its result; a retry with the same key finds the record and replays the saved response instead of charging again." },
   ],
-  related: [],
+  sections: [
+    { title: `The problem it solves`, body: `<p>Network calls fail ambiguously. A client sends "charge $50," the server processes it, but the response is lost to a timeout. The client cannot tell whether the charge happened, so it retries — and without protection the customer is billed twice. Retries are unavoidable and correct behavior in distributed systems; the job of an <b>idempotency key</b> is to make a retried write have the same effect as sending it once. It turns an unsafe operation (POST a payment) into one that is safe to repeat.</p>` },
+    { title: `Structure`, figureAfter: "idem-key-flow", body: `<p>The client generates a unique key per <em>logical operation</em> — a UUID, typically sent in an <code>Idempotency-Key</code> header (this is exactly how Stripe's and PayPal's APIs work). The server keeps an <b>idempotency store</b>: a table keyed by that value, holding the request's status and, once complete, the saved response. The key identifies "this specific attempt to do this specific thing," so all retries of it share one record.</p>
+<p>Crucially the key must be stable across retries (the client reuses the same key when retrying) but different for genuinely different operations, so two separate $50 charges are not mistaken for one.</p>
+<pre>@Service
+public class IdempotencyService {
+    private final IdempotencyKeyRepository repo;
+    private final PaymentGateway gateway;
+    private final LedgerService ledger;
+
+    @Transactional
+    public ChargeResponse charge(ChargeRequest req, String idempotencyKey) {
+        String hash = sha256(idempotencyKey + ":" + req.walletId());
+
+        Optional&lt;IdempotencyKeyRecord&gt; existing = repo.findByKeyHash(hash);
+        if (existing.isPresent()) {
+            IdempotencyKeyRecord rec = existing.get();
+            if (rec.getStatus() == Status.COMPLETED) {
+                return deserialize(rec.getResponseBody());
+            }
+            throw new ConflictException("Charge in progress for key");
+        }
+
+        repo.save(new IdempotencyKeyRecord(hash, Status.IN_PROGRESS));
+
+        ChargeResult result = gateway.charge(req);
+        if (result.status() == ChargeStatus.CAPTURED) {
+            ledger.debit(req.walletId(), req.amount(), req.paymentId());
+        }
+
+        ChargeResponse response = ChargeResponse.from(result);
+        repo.markCompleted(hash, 200, serialize(response));
+        return response;
+    }
+}</pre>` },
+    { title: `Processing flow, step by step`, body: `<ol>
+<li><b>Insert-or-find.</b> On arrival, atomically insert a row for the key in an <code>in-progress</code> state. Use a unique constraint so two concurrent retries race and exactly one wins the insert.</li>
+<li><b>First time (won the insert):</b> perform the operation — debit the wallet, call the gateway — and then store the result and mark the row <code>completed</code>, ideally in the <em>same transaction</em> as the effect so they commit together.</li>
+<li><b>Duplicate (row already exists):</b> if <code>completed</code>, return the stored response verbatim without re-executing. If still <code>in-progress</code>, the original is running concurrently — return a "retry later" / 409 so you do not double-apply.</li>
+</ol>
+<p>Binding the effect and the key record in one atomic commit is what closes the crash window: you never end up having charged without recording the key, or recorded the key without charging.</p>
+<pre>// Idempotency-Key header filter (Spring)
+@Component
+@Order(Ordered.HIGHEST_PRECEDENCE)
+public class IdempotencyKeyFilter extends OncePerRequestFilter {
+    private final IdempotencyService idempotency;
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest req,
+            HttpServletResponse res, FilterChain chain)
+            throws ServletException, IOException {
+        String key = req.getHeader("Idempotency-Key");
+        if (key == null || !"POST".equals(req.getMethod())) {
+            chain.doFilter(req, res);
+            return;
+        }
+        Optional&lt;CachedResponse&gt; cached = idempotency.find(key);
+        if (cached.isPresent()) {
+            res.setStatus(cached.get().status());
+            res.getWriter().write(cached.get().body());
+            return;
+        }
+        ContentCachingResponseWrapper wrapped =
+            new ContentCachingResponseWrapper(res);
+        idempotency.begin(key);
+        try {
+            chain.doFilter(req, wrapped);
+            idempotency.complete(key, wrapped.getStatus(),
+                new String(wrapped.getContentAsByteArray()));
+            wrapped.copyBodyToResponse();
+        } catch (Exception e) {
+            idempotency.fail(key);
+            throw e;
+        }
+    }
+}
+
+@Entity
+@Table(name = "idempotency_keys",
+       uniqueConstraints = @UniqueConstraint(columnNames = "key_hash"))
+public class IdempotencyKeyRecord {
+    @Id @GeneratedValue private Long id;
+    @Column(name = "key_hash", nullable = false) private String keyHash;
+    @Enumerated(EnumType.STRING) private Status status; // IN_PROGRESS, COMPLETED
+    private int responseStatus;
+    @Lob private String responseBody;
+    private Instant createdAt;
+    public enum Status { IN_PROGRESS, COMPLETED, FAILED }
+}</pre>` },
+    { title: `Subtleties to get right`, body: `<ul>
+<li><b>Atomicity.</b> If the debit and the key record are separate commits, a crash between them either double-charges or loses the record. Put both in one transaction, or use the store's conditional insert as the fence.</li>
+<li><b>Concurrent duplicates.</b> Two retries can arrive at once; the unique-key insert must serialize them so only the first executes.</li>
+<li><b>Request fingerprint.</b> Optionally hash the request body and store it with the key; if the same key arrives with a <em>different</em> body, reject it — that is a client bug, not a retry.</li>
+<li><b>Expiry.</b> Keys need a TTL (hours to days) long enough to cover realistic retry windows; too short and a late retry re-executes.</li>
+<li><b>Scope.</b> A key is meaningful within one endpoint/tenant; namespace it so unrelated operations cannot collide.</li>
+</ul>` },
+    { title: `Where it fits`, body: `<p>Idempotency keys are the standard defense for any <b>non-idempotent HTTP write</b> a client may retry — payments, transfers, order creation. They are the request-layer counterpart to broker-side <b>deduplication</b> (which keys off event ids) and the concrete mechanism that makes "exactly-once processing" achievable on top of at-least-once delivery. Expose the header in your API, generate a fresh key per user intent on the client, and keep the store's write atomic with the side effect.</p>` },
+  ],
+  related: ["deduplication", "exactly-once", "duplicate-events", "fencing-tokens", "tcc", "consumer-rebalancing"],
 };
 
 export function createSimulation(stage, panel, stageEl) {
-  return sequenceSim(stage, panel, stageEl, {
-    note: "Client retries POST /pay after a lost response.",
-    toggles: [{ key: "fix", label: "Send an Idempotency-Key", kind: "ok", value: false }],
-    scenario(ctx) {
-      const fix = ctx.toggles.fix;
-      const actors = [
-        { id: "cl", label: "Client", color: C.client, kind: "actor" },
-        { id: "s", label: "Pay API", color: C.service },
-        { id: "w", label: "Wallet", color: C.ledger, kind: "db", value: "100" },
-      ];
-      const steps = [
-        { from: "cl", to: "s", label: fix ? "POST /pay key=abc" : "POST /pay", set: { s: fix ? "store abc" : "process" } },
-        { from: "s", to: "w", label: "charge 40", good: true, set: { w: "60" } },
-        { from: "s", to: "cl", label: "200 OK (response lost)", dashed: true, bad: true, set: { cl: "timeout → retry" } },
-        { from: "cl", to: "s", label: fix ? "retry key=abc" : "retry POST /pay", set: { s: fix ? "key seen!" : "process again" } },
-        fix
-          ? { from: "s", to: "cl", label: "replay stored 200", good: true, set: { s: "no re-charge" } }
-          : { from: "s", to: "w", label: "charge 40 again", bad: true, set: { w: "20", s: "double charge!" } },
-      ];
-      return {
-        actors, steps, stepDur: 1.05,
-        status: (r) => !r.done ? { text: "handling retry…", cls: "" }
-          : fix ? { text: "charged once (100→60), retry replayed", cls: "ok" } : { text: "charged twice (100→20)", cls: "err" },
-      };
-    },
-  });
+  return createTopicSim("idempotency-key", stage, panel, stageEl);
 }

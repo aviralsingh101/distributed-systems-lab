@@ -1,6 +1,7 @@
 // @article-v2
-import { mountSimulation } from "../../../sim/controls.js";
+// @sim-lab
 import { C, clamp } from "../../../sim/primitives.js";
+import { createTopicSim } from "../../../sim/lab/registry.js";
 
 export const meta = { id: "bulkhead", title: "Bulkhead Isolation", category: "failure" };
 
@@ -35,90 +36,11 @@ export const content = {
 <p>Interview tip: whiteboard the charge flow, mark where <b>Bulkhead Isolation</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
   ],
   figures: [
-    { id: "timeline", svg: `<svg viewBox="0 0 520 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Bulkhead Isolation timeline">
-<defs><marker id="fig-bulkhead-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<text x="260" y="18" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Concurrent timeline — time flows right</text>
-<rect x="20" y="40" width="70" height="32" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="55" y="60" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Worker A</text>
-<rect x="20" y="90" width="70" height="32" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="55" y="110" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Worker B</text>
-<rect x="120" y="65" width="90" height="40" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
-<text x="165" y="79" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Shared row</text><text x="165" y="99" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">Ledger</text>
-<rect x="240" y="40" width="80" height="32" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="280" y="60" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">read 100</text>
-<rect x="340" y="40" width="80" height="32" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="380" y="60" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">write 120</text>
-<rect x="240" y="90" width="80" height="32" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="280" y="110" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">read 100</text>
-<rect x="340" y="90" width="80" height="32" rx="6" fill="#1a2236" stroke="#ff5c6c" stroke-width="1.5"/>
-<text x="380" y="100" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">write 130</text><text x="380" y="120" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">stale!</text>
-<rect x="440" y="65" width="70" height="40" rx="6" fill="#1a2236" stroke="#ff5c6c" stroke-width="1.5"/>
-<text x="475" y="79" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">130 ✗</text><text x="475" y="99" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">lost +20</text>
-<line x1="90" y1="56" x2="118" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-bulkhead-arr)"/>
-<line x1="90" y1="106" x2="118" y2="88" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-bulkhead-arr)"/>
-<line x1="210" y1="80" x2="238" y2="56" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-bulkhead-arr)"/>
-<line x1="210" y1="88" x2="238" y2="106" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-bulkhead-arr)"/>
-<line x1="320" y1="56" x2="338" y2="56" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-bulkhead-arr)"/>
-<line x1="320" y1="106" x2="338" y2="106" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-bulkhead-arr)"/>
-<line x1="420" y1="56" x2="438" y2="78" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-bulkhead-arr)"/>
-<line x1="420" y1="106" x2="438" y2="92" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-bulkhead-arr)"/>
-</svg>`, caption: `How Bulkhead Isolation unfolds — two workers interleave on the same resource; the second write can overwrite the first.` },
-    { id: "request-path", svg: `<svg viewBox="0 0 640 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Bulkhead Isolation in request path">
-<defs><marker id="fig-bulkhead-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="10" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="46" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Client</text>
-<rect x="100" y="40" width="88" height="36" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="144" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Bulkhead Isol…</text><text x="144" y="72" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">this topic</text>
-<rect x="206" y="40" width="80" height="36" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
-<text x="246" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Order</text>
-<rect x="304" y="40" width="84" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="346" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Gateway</text>
-<rect x="406" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="442" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger</text>
-<rect x="496" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="532" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Queue</text>
-<line x1="82" y1="58" x2="98" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-bulkhead-arr)"/>
-<line x1="188" y1="58" x2="204" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-bulkhead-arr)"/>
-<line x1="286" y1="58" x2="302" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-bulkhead-arr)"/>
-<line x1="388" y1="58" x2="404" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-bulkhead-arr)"/>
-<line x1="478" y1="58" x2="494" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-bulkhead-arr)"/>
-<text x="320" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">HTTPS request flow — Bulkhead Isolation</text>
-</svg>`, caption: `Bulkhead Isolation on the payment request path — from client charge to Ledger commit.` }
+    { id: "state-machine", svg: `<svg viewBox="0 0 480 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Bulkhead Isolation states"> <rect x="30" y="40" width="100" height="44" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/> <text x="80" y="56" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Closed</text><text x="80" y="72" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">requests pass</text> <rect x="190" y="40" width="100" height="44" rx="6" fill="#1a2236" stroke="#ff5c6c" stroke-width="1.5"/> <text x="240" y="56" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Open</text><text x="240" y="72" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">fail fast</text> <rect x="350" y="40" width="100" height="44" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/> <text x="400" y="56" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Half-open</text><text x="400" y="72" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">test probe</text> <text x="130" y="30" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">failures ↑</text> <text x="270" y="30" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">timeout</text> <text x="400" y="30" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">success → closed</text> </svg>`, caption: `Bulkhead Isolation: state transitions — normal operation, failure isolation, and recovery probe.` },
   ],
   related: [],
 };
 
 export function createSimulation(stage, panel, stageEl) {
-  return mountSimulation(stage, panel, stageEl, {
-    note: "Threads serving three dependencies; Fraud is slow.",
-    toggles: [{ key: "fix", label: "Separate pool per dependency", kind: "ok", value: false }],
-    frame(ctx, t) {
-      const d = ctx.d; const fix = ctx.toggles.fix;
-      const deps = [{ label: "Wallet", c: C.ledger, slow: false }, { label: "Fraud", c: C.gateway, slow: true }, { label: "Ledger", c: C.service, slow: false }];
-      if (!fix) {
-        // one shared pool of 9 threads; slow fraud hogs most
-        d.node(360, 90, 280, 60, { title: "Shared thread pool (9)", color: C.warn, state: "err", active: true });
-        for (let i = 0; i < 9; i++) {
-          const x = 390 + (i % 9) * 26;
-          const fraud = i < 7; // 7/9 stuck on fraud
-          d.token(x, 170, { r: 8, color: fraud ? C.err : C.ok, glow: false });
-        }
-        deps.forEach((dep, i) => {
-          const x = 230 + i * 270;
-          d.node(x - 70, 300, 140, 52, { title: dep.label, color: dep.c, state: dep.slow ? "err" : "warn", value: dep.slow ? "slow" : "starved" });
-        });
-        d.badge(500, 430, "Fraud hogged the pool — all deps starved", { color: C.err, align: "center" });
-        ctx.setStatus("shared pool exhausted by one slow dep", "err");
-      } else {
-        deps.forEach((dep, i) => {
-          const x = 230 + i * 270;
-          d.node(x - 90, 90, 180, 56, { title: dep.label + " pool (3)", color: dep.c, state: dep.slow ? "err" : "ok" });
-          for (let k = 0; k < 3; k++) d.token(x - 30 + k * 30, 200, { r: 8, color: dep.slow ? C.err : C.ok, glow: false });
-          d.node(x - 70, 300, 140, 52, { title: dep.label, color: dep.c, state: dep.slow ? "err" : "ok", value: dep.slow ? "slow (isolated)" : "responsive" });
-        });
-        d.badge(500, 430, "Fraud fills only its own pool — others fine", { color: C.ok, align: "center" });
-        ctx.setStatus("bulkheads isolate the slow dependency", "ok");
-      }
-    },
-  });
+  return createTopicSim("bulkhead", stage, panel, stageEl);
 }

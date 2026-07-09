@@ -1,98 +1,115 @@
 // @article-v2
-import { mountSimulation } from "../../../sim/controls.js";
-import { C, phaseOf } from "../../../sim/primitives.js";
+// @sim-lab
+import { createTopicSim } from "../../../sim/lab/registry.js";
 
 export const meta = { id: "vector-clock", title: "Vector Clock", category: "ordering" };
 
+const VECTOR_SVG = `<svg viewBox="0 0 720 190" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Vector clocks detecting concurrent versus causal events">
+  <defs><marker id="fig-vector-clock-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
+  <text x="55" y="45" text-anchor="middle" fill="#5b9dff" font-size="10" font-family="system-ui">A</text>
+  <text x="55" y="145" text-anchor="middle" fill="#7c5cff" font-size="10" font-family="system-ui">B</text>
+  <line x1="80" y1="40" x2="690" y2="40" stroke="#93a1bd" stroke-width="1"/>
+  <line x1="80" y1="140" x2="690" y2="140" stroke="#93a1bd" stroke-width="1"/>
+  <g font-family="system-ui" font-size="9">
+    <circle cx="150" cy="40" r="5" fill="#3ddc97"/><text x="150" y="28" text-anchor="middle" fill="#cdd6e8">[1,0]</text>
+    <circle cx="300" cy="40" r="5" fill="#3ddc97"/><text x="300" y="28" text-anchor="middle" fill="#cdd6e8">[2,0]</text>
+    <circle cx="150" cy="140" r="5" fill="#ff6b6b"/><text x="150" y="160" text-anchor="middle" fill="#cdd6e8">[0,1]</text>
+    <circle cx="470" cy="140" r="5" fill="#3ddc97"/><text x="470" y="160" text-anchor="middle" fill="#cdd6e8">[2,2]</text>
+  </g>
+  <line x1="300" y1="46" x2="465" y2="134" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-vector-clock-arr)"/>
+  <text x="235" y="95" text-anchor="middle" fill="#3ddc97" font-size="9" font-family="system-ui">[2,0] → [0,1] concurrent</text>
+  <text x="420" y="105" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">[2,0] → [2,2] causal (A ≤ B)</text>
+</svg>`;
+
 export const content = {
-  oneliner: `Detect concurrent writes.`,
-  archetype: "pattern",
-  sections: [
-    { title: `Motivation`, body: `<p>Detect concurrent writes.</p>
-<p>Without <b>Vector Clock</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>Concurrency control prevents conflicting wallet updates. Row-level locks block concurrent writers; version columns enable optimistic retry; distributed locks (Redis, etcd) coordinate cross-service critical sections with fencing tokens.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Vector Clock</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Vector Clock</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Vector Clock</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Vector Clock</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
-  ],
+  oneliner: `A vector of per-process counters that captures full causal history, so you can tell whether two events are causally ordered or genuinely concurrent — the thing a Lamport clock cannot do.`,
+  archetype: "concept",
   figures: [
-    { id: "dist-lock", svg: `<svg viewBox="0 0 400 110" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Distributed lock">
-<rect x="40" y="38" width="70" height="36" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
-<text x="75" y="60" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Pod A</text>
-<rect x="40" y="78" width="70" height="28" rx="6" fill="#1a2236" stroke="#ff5c6c" stroke-width="1.5"/>
-<text x="75" y="86" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Pod B</text><text x="75" y="106" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">stale</text>
-<rect x="160" y="48" width="90" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="205" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Redis Lock</text><text x="205" y="82" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">token=42</text>
-<rect x="290" y="38" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="335" y="60" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger</text>
-<text x="200" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Only token holder may write</text>
-</svg>`, caption: `Distributed lock: SET key NX PX with unique token; stale holder rejected via fencing token.` }
+    { id: "vector-flow", svg: VECTOR_SVG, caption: "Each event carries a counter per process. [2,0] and [0,1] are incomparable, so they are concurrent; [2,0] is componentwise ≤ [2,2], so it causally precedes it." },
   ],
-  related: [],
+  sections: [
+    { title: `Why a scalar clock is not enough`, body: `<p>A Lamport clock guarantees that if a happens-before b then <code>C(a) &lt; C(b)</code> — but the reverse does not hold, so a smaller timestamp cannot prove causal order and cannot reveal concurrency. That gap matters when two replicas accept writes independently: you must know whether one write <em>saw</em> the other (keep the newer) or they were made <b>concurrently</b> in ignorance of each other (a genuine conflict to reconcile). A single counter throws away the information needed to answer this. A <b>vector clock</b> keeps it.</p>` },
+    { title: `How it works`, body: `<p>With N processes, each event carries a <b>vector</b> of N counters — one slot per process — representing "how many events from each process this event causally depends on." The rules generalize the Lamport ones:</p>
+<ol>
+<li><b>Local event on process i.</b> Increment your own slot: <code>V[i] = V[i] + 1</code>.</li>
+<li><b>Send.</b> Attach the whole vector to the message.</li>
+<li><b>Receive on process i.</b> Take the elementwise maximum with the received vector, then increment your own slot: <code>V[k] = max(V[k], recv[k])</code> for all k, then <code>V[i] += 1</code>.</li>
+</ol>
+<p>Each slot thus records the latest event from that process which the current event knows about. The vector is a compact summary of the event's entire causal history.</p>
+<pre>// VectorClock — N counters, one per process
+public final class VectorClock {
+    private final int[] vector;
+
+    public VectorClock(int numProcesses) {
+        this.vector = new int[numProcesses];
+    }
+
+    public VectorClock tick(int processIndex) {
+        vector[processIndex]++;
+        return this;
+    }
+
+    public VectorClock merge(int processIndex, VectorClock received) {
+        for (int i = 0; i &lt; vector.length; i++) {
+            vector[i] = Math.max(vector[i], received.vector[i]);
+        }
+        vector[processIndex]++;
+        return this;
+    }
+
+    public Ordering compare(VectorClock other) {
+        boolean thisLeOther = true, otherLeThis = true;
+        for (int i = 0; i &lt; vector.length; i++) {
+            if (vector[i] &gt; other.vector[i]) otherLeThis = false;
+            if (vector[i] &lt; other.vector[i]) thisLeOther = false;
+        }
+        if (thisLeOther &amp;&amp; otherLeThis) return Ordering.EQUAL;
+        if (thisLeOther) return Ordering.BEFORE;
+        if (otherLeThis) return Ordering.AFTER;
+        return Ordering.CONCURRENT; // genuine conflict
+    }
+
+    public int[] snapshot() { return vector.clone(); }
+    public enum Ordering { BEFORE, AFTER, CONCURRENT, EQUAL }
+}</pre>` },
+    { title: `Comparing vectors: before, after, or concurrent`, body: `<p>Order is determined by componentwise comparison of two vectors V and W:</p>
+<ul>
+<li><b>V → W (V causally precedes W)</b> if <code>V[k] ≤ W[k]</code> for every k and they are not equal. Everything V knew, W also knew.</li>
+<li><b>W → V</b> by the symmetric condition.</li>
+<li><b>V ∥ W (concurrent)</b> if neither is componentwise ≤ the other — each has at least one slot the other lacks. This is the case Lamport clocks cannot detect, and it means the two events happened without knowledge of each other.</li>
+</ul>
+<p>So vector clocks give you a partial order that exactly captures happens-before, plus explicit detection of concurrency.</p>
+<pre>// Wallet replica: detect concurrent debits, surface siblings
+public class WalletReplica {
+    private final VectorClock clock;
+    private final int myProcessIndex;
+    private WalletState state = WalletState.empty();
+
+    public MergeResult applyDebit(WalletDebitEvent evt) {
+        VectorClock evtClock = evt.vectorClock();
+        Ordering ord = state.clock().compare(evtClock);
+
+        if (ord == VectorClock.Ordering.BEFORE
+            || ord == VectorClock.Ordering.EQUAL) {
+            // evt causally follows current state — apply
+            state = state.debit(evt.amount())
+                .withClock(clock.merge(myProcessIndex, evtClock));
+            return MergeResult.APPLIED;
+        }
+        if (ord == VectorClock.Ordering.AFTER) {
+            return MergeResult.STALE; // already superseded
+        }
+        // Concurrent — two debits in ignorance of each other
+        return MergeResult.CONFLICT(
+            state, evt); // application merges or picks winner
+    }
+}</pre>` },
+    { title: `Where they are used`, body: `<p>Vector clocks are the classic tool for <b>conflict detection in eventually-consistent stores</b>. Amazon Dynamo and its descendants (Riak, early Voldemort) tag each object version with a vector clock; on read, if two versions are concurrent, the store surfaces both <b>siblings</b> and lets the application (or a CRDT merge) resolve them, rather than silently losing a write via last-writer-wins. They also underpin causal-consistency protocols and collaborative-editing systems that must merge independent edits.</p>` },
+    { title: `The cost`, body: `<p>The price of that precision is size: a vector grows with the number of participating processes, so in systems with many transient clients the vectors can bloat. Real systems bound this with <b>dotted version vectors</b>, per-server (not per-client) entries, and pruning of entries for departed nodes. The trade-off is the guide: use a <b>Lamport clock</b> when you only need a consistent total order cheaply; use a <b>vector clock</b> when you must distinguish causal from concurrent — typically for multi-writer conflict resolution.</p>` },
+  ],
+  related: ["lamport-clock", "clock-skew", "eventual-consistency", "crdt", "out-of-order", "quorum"],
 };
 
 export function createSimulation(stage, panel, stageEl) {
-  return mountSimulation(stage, panel, stageEl, {
-    note: "Receive = element-wise max, then bump own entry.",
-    frame(ctx, t) {
-      const d = ctx.d;
-      const A = { x: 280, color: C.service, label: "Replica A" };
-      const B = { x: 720, color: C.gateway, label: "Replica B" };
-      // events
-      const events = [
-        { p: 0, k: "local" },          // A [1,0]
-        { p: 1, k: "local" },          // B [0,1] concurrent with above
-        { p: 0, k: "send", to: 1 },    // A [2,0]
-        { p: 1, k: "recv", from: 0 },  // B max([0,1],[2,0])+own = [2,2]
-        { p: 1, k: "local" },          // B [2,3]
-      ];
-      const ph = phaseOf(t, events.map(() => 1.2));
-      const V = [[0, 0], [0, 0]];
-      const stamps = [];
-      const sendVecs = {};
-      for (let i = 0; i <= ph.i && i < events.length; i++) {
-        const e = events[i];
-        if (e.k === "recv") {
-          const sv = sendVecs[e.from] || [0, 0];
-          V[e.p][0] = Math.max(V[e.p][0], sv[0]); V[e.p][1] = Math.max(V[e.p][1], sv[1]);
-          V[e.p][e.p] += 1;
-        } else { V[e.p][e.p] += 1; if (e.k === "send") sendVecs[e.p] = V[e.p].slice(); }
-        stamps[i] = V[e.p].slice();
-      }
-      const fmt = (v) => "[" + v.join(",") + "]";
-      [A, B].forEach((pp, idx) => {
-        d.node(pp.x - 80, 30, 160, 56, { title: pp.label, color: pp.color, active: true, value: fmt(V[idx]) });
-        d.ctx.save(); d.ctx.strokeStyle = C.panelLine; d.ctx.setLineDash([4, 7]);
-        d.ctx.beginPath(); d.ctx.moveTo(pp.x, 86); d.ctx.lineTo(pp.x, 500); d.ctx.stroke(); d.ctx.restore();
-      });
-      const y0 = 130, rh = 62;
-      for (let i = 0; i <= ph.i && i < events.length; i++) {
-        const e = events[i]; const px = e.p === 0 ? A.x : B.x; const y = y0 + i * rh;
-        if (e.k === "send") d.arrow(px, y, (e.to === 0 ? A.x : B.x), y + rh, { color: C.accent, width: 2, label: fmt(stamps[i]), progress: i === ph.i ? ph.p : 1 });
-        else { d.token(px, y, { r: 11, color: e.k === "recv" ? C.ok : (e.p === 0 ? A.color : B.color) }); d.text(px + (e.p === 0 ? 20 : -20), y, fmt(stamps[i]), { size: 12, mono: true, align: e.p === 0 ? "left" : "right", color: C.ink }); }
-      }
-      // concurrency check on first two events
-      const concurrent = ph.i >= 1;
-      d.badge(500, 470, concurrent && ph.i < 3 ? "[1,0] ∥ [0,1] — concurrent (conflict!)" : "later events dominate — causal chain", { color: concurrent && ph.i < 3 ? C.warn : C.ok, align: "center" });
-      ctx.setStatus("incomparable vectors ⇒ concurrent writes detected", "ok");
-    },
-  });
+  return createTopicSim("vector-clock", stage, panel, stageEl);
 }

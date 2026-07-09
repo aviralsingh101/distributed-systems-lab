@@ -1,7 +1,5 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { layerTemplate } from "../../../sim/templates/index.js";
 
 const topic = makeTopic({
   id: "test-doubles",
@@ -9,69 +7,104 @@ const topic = makeTopic({
   category: "lld-testing",
   track: "lld",
   tier: "essential",
-  archetype: "pattern",
-  oneliner: `Mocks, stubs, fakes, and spies.`,
+  archetype: "concept",
+  oneliner: `Dummy, stub, spy, mock, and fake — five distinct stand-ins for real collaborators, each answering a different testing question.`,
   sections: [
-    { title: `Motivation`, body: `<p>Mocks, stubs, fakes, and spies.</p>
-<p>Without <b>Test Doubles</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Test Doubles</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Test Doubles</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Test Doubles</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Test Doubles</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Test Doubles</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+    { title: `A vocabulary, not synonyms`, body: `<p>"Mock" is used colloquially for any stand-in, but Gerard Meszaros's taxonomy names <b>five distinct kinds</b> of test double, and the distinctions matter because they change what your test actually asserts. A double replaces a real collaborator (a database, a gateway client, a clock) so the unit under test runs in isolation.</p>
+<table>
+<tr><td><b>Dummy</b></td><td>Passed only to satisfy a signature; never used. E.g. a no-op logger you must supply but never call.</td></tr>
+<tr><td><b>Stub</b></td><td>Returns canned answers to calls made during the test. Provides <em>indirect input</em>.</td></tr>
+<tr><td><b>Spy</b></td><td>A stub that also records how it was called, so the test can inspect calls afterward.</td></tr>
+<tr><td><b>Mock</b></td><td>Pre-programmed with expectations; it fails the test itself if the expected calls do not happen.</td></tr>
+<tr><td><b>Fake</b></td><td>A real working implementation, just lighter — e.g. an in-memory repository instead of Postgres.</td></tr>
+</table>` },
+    { title: `How Mockito implements stubs, mocks, and spies`, body: `<p><b>Mockito</b> is the standard Java library for behaviour verification. Here is how each double type works in a payment charge flow:</p>
+<pre>import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.*;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
+@ExtendWith(MockitoExtension.class)
+class ChargeServiceTest {
+
+    @Mock PaymentGateway gateway;          // mock: behaviour verification
+    @Mock ExchangeRateService rates;       // stub: canned return value
+    @Spy OutboxPublisher outbox = new OutboxPublisher();  // spy: real object, call tracking
+    @InjectMocks ChargeService chargeService;
+
+    @Test
+    void charge_convertsCurrencyAndRecordsLedger() {
+        // STUB — provide indirect input
+        when(rates.usdToEur(anyLong())).thenReturn(0.92);
+
+        ChargeRequest request = new ChargeRequest(
+            "pay-001", "wallet-42", new Money(10000, "USD"), PaymentMethod.CARD);
+
+        when(gateway.charge(request)).thenReturn(
+            new ChargeResult("pay-001", ChargeStatus.CAPTURED, "stripe_pi_abc"));
+
+        ChargeResult result = chargeService.charge(request);
+
+        // STATE verification — assert on outcome
+        assertEquals(ChargeStatus.CAPTURED, result.status());
+
+        // MOCK behaviour verification — gateway called exactly once
+        verify(gateway, times(1)).charge(request);
+        verify(gateway, never()).refund(any());
+
+        // SPY — outbox actually ran, and we inspect the call
+        verify(outbox).publish(argThat(evt -&gt;
+            evt.type().equals("PaymentCaptured") &amp;&amp;
+            evt.paymentId().equals("pay-001")));
+    }
+}</pre>
+<p>The deepest split is <b>what you assert on</b>. Stubs and fakes support <b>state verification</b>: you drive the system, then assert on the resulting value or stored state. Mocks and spies support <b>behavior verification</b>: you assert that a particular <em>interaction</em> occurred — that <code>gateway.charge()</code> was called exactly once with this amount.</p>` },
+    { title: `Fakes and dummies in practice`, body: `<p>When a collaborator has rich behaviour you depend on — a repository, a cache — a <b>fake</b> (in-memory implementation) usually gives more robust, less brittle tests than a mock bristling with expectations:</p>
+<pre>// FAKE — real working in-memory wallet repository
+public class InMemoryWalletRepository implements WalletRepository {
+    private final Map&lt;String, Wallet&gt; store = new ConcurrentHashMap&lt;&gt;();
+
+    @Override
+    public Optional&lt;Wallet&gt; findById(String walletId) {
+        return Optional.ofNullable(store.get(walletId));
+    }
+
+    @Override
+    public void debit(String walletId, long amountCents) {
+        Wallet wallet = store.computeIfAbsent(walletId, Wallet::new);
+        if (wallet.balanceCents() &lt; amountCents) {
+            throw new InsufficientFundsException(walletId);
+        }
+        store.put(walletId, wallet.withBalance(wallet.balanceCents() - amountCents));
+    }
+}
+
+@Test
+void charge_debitsWalletOnCapture() {
+    WalletRepository repo = new InMemoryWalletRepository();
+    repo.save(new Wallet("wallet-42", 50000L));
+    ChargeService service = new ChargeService(
+        new FakePaymentGateway(), repo, new NoOpOutbox());
+
+    service.charge(new ChargeRequest("pay-002", "wallet-42",
+        new Money(10000, "USD"), PaymentMethod.CARD));
+
+    assertEquals(40000L, repo.findById("wallet-42").orElseThrow().balanceCents());
+}</pre>
+<pre>// DUMMY — satisfies constructor, never invoked
+public final class NoOpAuditLogger implements AuditLogger {
+    @Override public void log(String event) { /* intentionally empty */ }
+}
+
+ChargeService service = new ChargeService(gateway, repo, outbox, new NoOpAuditLogger());</pre>` },
+    { title: `Choosing the right double`, body: `<p>Prefer the <b>least powerful double that still expresses your intent</b>. If you only need a value back, use a stub. If the whole point of the test is that a side effect happened (an event was published, a row was written), a mock or spy on that boundary is appropriate. When a collaborator has rich behavior you depend on — a repository, a cache — a <b>fake</b> usually gives more robust, less brittle tests than a mock bristling with expectations.</p>
+<p><b>Over-mocking</b> is the common failure: tests that mock every collaborator end up asserting the implementation's call sequence rather than its behavior, so they break on every harmless refactor while missing real bugs. A useful rule: mock the boundaries you own the contract for (gateway, broker), and fake or use real objects for pure domain logic. In the payment flow, stub the exchange-rate lookup, fake the wallet repository, and mock the outbox publisher whose call is the actual thing under test.</p>` },
   ],
-  figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Test Doubles structure">
-<defs><marker id="fig-test-doubles-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Test Doubles</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-test-doubles-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-test-doubles-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-test-doubles-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Test Doubles — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Test Doubles pattern — components and data flow in Order Service.` }
-  ],
-  related: [],
-  
-  
-  template: "layer",
-  sim: () => ({
-    note: `Explore Test Doubles in the payment platform.`,
-    toggles: [{ key: "fix", label: "Apply layering", kind: "ok", value: false }],
-    layers: (ctx) => [
-      { name: "API", components: [{ title: "REST/gRPC", active: true }] },
-      { name: "Domain", components: [{ title: "Test Doubles", active: ctx.toggles.fix, color: C.accent }] },
-      { name: "Data", components: [{ title: "Ledger", color: C.ledger }, { title: "Queue", color: C.queue }] },
-    ],
-    status: (ctx) => ({ text: ctx.toggles.fix ? "clean separation" : "logic leaks across layers", cls: ctx.toggles.fix ? "ok" : "err" }),
-  }),
+  related: ["unit-integration-contract", "tdd-for-lld", "dependency-injection"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

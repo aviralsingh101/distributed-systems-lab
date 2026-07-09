@@ -1,7 +1,24 @@
 // @article-v2
+// @sim-lab
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { stateMachineTemplate } from "../../../sim/templates/index.js";
+import { createTopicSim } from "../../../sim/lab/registry.js";
+
+const BUCKET_SVG = `<svg viewBox="0 0 560 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Token bucket">
+  <defs><marker id="fig-rate-limiter-in-process-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
+  <text x="120" y="24" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">refill r tokens/sec</text>
+  <line x1="120" y1="30" x2="120" y2="58" stroke="#3ddc97" stroke-width="1.6" marker-end="url(#fig-rate-limiter-in-process-arr)"/>
+  <path d="M60,60 L180,60 L165,150 L75,150 Z" fill="#1a2236" stroke="#5b9dff" stroke-width="1.6"/>
+  <circle cx="100" cy="120" r="7" fill="#3ddc97"/><circle cx="120" cy="120" r="7" fill="#3ddc97"/>
+  <circle cx="140" cy="120" r="7" fill="#3ddc97"/><circle cx="110" cy="103" r="7" fill="#3ddc97"/>
+  <text x="120" y="170" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">capacity = burst size</text>
+  <line x1="180" y1="105" x2="300" y2="105" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-rate-limiter-in-process-arr)"/>
+  <text x="240" y="96" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">take 1 token</text>
+  <rect x="310" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
+  <text x="365" y="85" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">allow (token)</text>
+  <rect x="310" y="120" width="110" height="40" rx="6" fill="#1a2236" stroke="#ff6b6b" stroke-width="1.5"/>
+  <text x="365" y="145" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">reject (empty)</text>
+  <text x="490" y="105" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">429</text>
+</svg>`;
 
 const topic = makeTopic({
   id: "rate-limiter-in-process",
@@ -9,75 +26,106 @@ const topic = makeTopic({
   category: "lld-classics",
   track: "lld",
   tier: "essential",
-  archetype: "pattern",
-  oneliner: `Token bucket in one JVM/process.`,
-  sections: [
-    { title: `Motivation`, body: `<p>Token bucket in one JVM/process.</p>
-<p>Without <b>Rate Limiter (In-Process)</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Rate Limiter (In-Process)</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Rate Limiter (In-Process)</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Rate Limiter (In-Process)</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Rate Limiter (In-Process)</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Rate Limiter (In-Process)</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
-  ],
+  archetype: "classic",
+  oneliner: `Cap requests to R/sec while allowing short bursts, using a token bucket held in one process — no network round-trip per check.`,
   figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Rate Limiter (In-Process) structure">
-<defs><marker id="fig-rate-limiter-in-process-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Rate Limiter (I…</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-rate-limiter-in-process-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-rate-limiter-in-process-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-rate-limiter-in-process-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Rate Limiter (In-Process) — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Rate Limiter (In-Process) pattern — components and data flow in Order Service.` }
+    { id: "token-bucket", svg: BUCKET_SVG, caption: "Tokens refill at a steady rate up to a capacity; each request spends one token, and an empty bucket means reject." },
   ],
-  related: [],
-  
-  
-  template: "stateMachine",
-  sim: () => ({
-    note: `Explore Rate Limiter (In-Process) in the payment platform.`,
-    toggles: [{ key: "fix", label: "Valid transitions only", kind: "ok", value: false }],
-    states: (ctx) => [
-      { id: "pending", label: "Pending", x: 200, y: 280, color: C.service },
-      { id: "active", label: "Rate Limiter (In-Process)", x: 500, y: 280, color: C.accent, good: true },
-      { id: "done", label: "Settled", x: 800, y: 280, color: C.ok, good: true },
-      { id: "bad", label: "Invalid", x: 500, y: 420, color: C.err, bad: true },
-    ],
-    currentState: (ctx, t) => {
-      if (!ctx.toggles.fix && (t % 6) > 4) return "bad";
-      return ["pending", "active", "done"][Math.floor((t * 0.35) % 3)];
-    },
-    transitions: [{ from: "pending", to: "active", label: "apply" }, { from: "active", to: "done", label: "commit" }],
-    status: (ctx) => ({ text: ctx.toggles.fix ? "state machine guards flow" : "illegal states possible", cls: ctx.toggles.fix ? "ok" : "err" }),
-  }),
+  sections: [
+    { title: `Requirement and the algorithm choice`, body: `<p>Limit a caller to a sustained rate (say 100 requests/second) while tolerating brief bursts, deciding <code>allow()</code> vs <code>reject()</code> in-process with no Redis round-trip. The candidate algorithms differ in burst behaviour:</p>
+<ul>
+<li><b>Fixed window</b> — count per calendar second. Simple, but allows a 2× spike straddling the boundary (100 at 0.9s + 100 at 1.1s).</li>
+<li><b>Sliding window log/counter</b> — smooths the boundary spike but stores more state.</li>
+<li><b>Leaky bucket</b> — drains at a constant rate; enforces a smooth output but no bursting.</li>
+<li><b>Token bucket</b> — the usual answer: steady refill plus a bucket that stores unused allowance, so it permits bursts up to the bucket size while bounding the long-run rate.</li>
+</ul>` },
+    { title: `Token bucket, mechanically`, figureAfter: "token-bucket", body: `<p>A bucket holds up to <b>capacity</b> tokens and refills at <b>rate</b> tokens per second. Each request tries to take one token: if the bucket is non-empty, take it and allow; otherwise reject (return 429 / retry-after). Capacity sets the maximum burst; rate sets the sustained throughput.</p>
+<p>The elegant trick is <b>lazy refill</b>: you do not run a background timer adding tokens. Instead, on each call you compute how many tokens <em>should</em> have accrued since the last check from elapsed time, and cap at capacity:</p>
+<pre>tokens = min(capacity, tokens + (now - lastRefill) * rate)</pre>
+<p>Then decrement if <code>tokens &gt;= 1</code>. This makes each check O(1) and stores just two numbers per bucket.</p>` },
+    { title: `TokenBucket implementation`, body: `<p>The core class uses lazy refill with a monotonic clock and synchronized access for thread safety:</p>
+<pre>public final class TokenBucket {
+    private final double capacity;
+    private final double refillPerSecond;
+    private double tokens;
+    private long lastRefillNanos;
+
+    public TokenBucket(double capacity, double refillPerSecond) {
+        this.capacity = capacity;
+        this.refillPerSecond = refillPerSecond;
+        this.tokens = capacity;
+        this.lastRefillNanos = System.nanoTime();
+    }
+
+    public synchronized boolean tryAcquire() {
+        refill();
+        if (tokens &gt;= 1.0) {
+            tokens -= 1.0;
+            return true;
+        }
+        return false;
+    }
+
+    public synchronized boolean tryAcquire(int permits) {
+        refill();
+        if (tokens &gt;= permits) {
+            tokens -= permits;
+            return true;
+        }
+        return false;
+    }
+
+    private void refill() {
+        long now = System.nanoTime();
+        double elapsedSec = (now - lastRefillNanos) / 1_000_000_000.0;
+        tokens = Math.min(capacity, tokens + elapsedSec * refillPerSecond);
+        lastRefillNanos = now;
+    }
+
+    public synchronized double availableTokens() {
+        refill();
+        return tokens;
+    }
+}</pre>` },
+    { title: `Per-key RateLimiter with ConcurrentHashMap`, body: `<p>Per-caller limiting means one bucket <em>per key</em> in a concurrent map. Guard each bucket's read-modify-write so two threads cannot both spend the last token:</p>
+<pre>public final class RateLimiter {
+    private final ConcurrentHashMap&lt;String, TokenBucket&gt; buckets = new ConcurrentHashMap&lt;&gt;();
+    private final double capacity;
+    private final double refillPerSecond;
+
+    public RateLimiter(double capacity, double refillPerSecond) {
+        this.capacity = capacity;
+        this.refillPerSecond = refillPerSecond;
+    }
+
+    public boolean allow(String apiKey) {
+        TokenBucket bucket = buckets.computeIfAbsent(apiKey,
+            k -&gt; new TokenBucket(capacity, refillPerSecond));
+        return bucket.tryAcquire();
+    }
+
+    public RateLimitResult checkPaymentEndpoint(String walletId) {
+        if (allow(walletId)) {
+            return RateLimitResult.allowed();
+        }
+        return RateLimitResult.rejected(429, "Retry-After", "1");
+    }
+}
+
+public record RateLimitResult(boolean allowed, int statusCode, String header, String value) {
+    static RateLimitResult allowed() { return new RateLimitResult(true, 200, null, null); }
+    static RateLimitResult rejected(int code, String header, String value) {
+        return new RateLimitResult(false, code, header, value);
+    }
+}</pre>
+<p>Two operational concerns. <b>Memory</b>: a map keyed by caller grows unbounded, so evict idle buckets — an LRU or a full-bucket sweep works, since a fully-refilled bucket carries no state worth keeping. <b>Clock</b>: use a monotonic clock (<code>nanoTime</code>), never wall-clock, so an NTP step backwards cannot mint or destroy tokens. The hard limit of an in-process limiter is that it only sees <em>this instance's</em> traffic; behind a load balancer with N replicas the real global rate is up to N× your configured limit. When you need a fleet-wide cap, move the counter to a shared store (Redis token bucket, or a sidecar) and accept the per-request round-trip — but for protecting a single process's local resource, in-process is the right, fast choice.</p>` },
+  ],
+  related: ["lru-cache", "in-memory-pub-sub", "backpressure-pattern"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
+
 export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
+  return createTopicSim("rate-limiter-in-process", stage, panel, stageEl);
 }

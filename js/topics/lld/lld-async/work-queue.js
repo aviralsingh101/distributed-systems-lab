@@ -1,7 +1,7 @@
 // @article-v2
+// @sim-lab
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { topologyTemplate } from "../../../sim/templates/index.js";
+import { createTopicSim } from "../../../sim/lab/registry.js";
 
 const topic = makeTopic({
   id: "work-queue",
@@ -10,77 +10,58 @@ const topic = makeTopic({
   track: "lld",
   tier: "essential",
   archetype: "pattern",
-  oneliner: `Distribute tasks to workers.`,
+  oneliner: `Buffer tasks in a durable queue and let a pool of workers pull and process them at their own pace, smoothing bursts and scaling by adding workers.`,
   sections: [
-    { title: `Motivation`, body: `<p>Distribute tasks to workers.</p>
-<p>Without <b>Work Queue</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>Messages flow through brokers with partitions for parallelism. Consumer groups rebalance on member join/leave. At-least-once delivery requires idempotent handlers keyed on <code>payment_id</code> or <code>event_id</code>.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Work Queue</b>:</p>
+    { title: `What a work queue is`, body: `<p>A <b>work queue</b> (task queue) decouples the <em>submission</em> of a job from its <em>execution</em>. A producer enqueues a task; a pool of workers pulls tasks and runs them asynchronously. It is a point-to-point pattern focused on offloading slow or spiky work — generating a PDF receipt, calling the <b>Payment Gateway</b>, running a settlement batch — out of the request path.</p>
+<p>The queue acts as a <b>buffer</b>: when arrivals temporarily exceed processing capacity, tasks accumulate instead of overwhelming the workers or failing the caller. This turns a load spike into a longer queue rather than a cascade of errors.</p>` },
+    { title: `Structure and pull-based flow`, body: `<p>The pattern is deliberately <b>pull-based</b>: workers ask for the next task when they are ready, which naturally load-balances toward faster/idle workers and is a form of backpressure — a saturated worker simply stops pulling.</p>
 <ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Work Queue</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Work Queue</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Work Queue</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<li>Producer serializes a task (type + payload + idempotency key) and enqueues it.</li>
+<li>An idle worker fetches one task (or a small prefetch batch) and marks it in-flight via a visibility timeout / unacked state.</li>
+<li>The worker executes, then <b>acks</b> on success so the broker deletes it, or <b>nacks</b>/lets the timeout expire on failure so it is redelivered.</li>
+<li>Autoscaling adds or removes workers based on <b>queue depth</b> and consumer lag.</li>
+</ol>` },
+    { title: `Reliability and semantics`, body: `<p>To survive crashes the queue must be <b>durable</b> and use ack-on-completion, which yields <b>at-least-once</b> delivery: a worker that dies mid-task loses its ack and the task is retried, so tasks can run more than once. Handlers must therefore be <b>idempotent</b>, keyed on a task/idempotency id.</p>
+<p>Control redelivery with a bounded <b>retry policy</b> (exponential backoff) and route repeatedly failing tasks to a <b>dead-letter queue</b> so one poison task cannot burn worker capacity forever. Set a sensible prefetch count: too high and a slow worker hoards messages it cannot process; too low and workers idle between fetches.</p>` },
+    { title: `Operating and when to use it`, body: `<p>The signals that matter are <b>queue depth</b> (backlog) and <b>consumer lag</b> (how far behind workers are). A steadily growing backlog means arrival rate exceeds throughput — add workers or shed load; a flat-then-spiky backlog is normal burst absorption. Watch for the queue quietly hiding an under-provisioned worker pool.</p>
+<p>Use a work queue whenever work can be done asynchronously and you want to smooth bursts, isolate slow dependencies, and scale processing independently of request traffic. If instead multiple services must each react to an event, use pub/sub; if the caller needs the result, use request-reply.</p>
+<pre>// --- Producer: enqueue task, return immediately ---
+@RestController
+public class ReceiptController {
+    private final KafkaTemplate&lt;String, String&gt; kafka;
+
+    @PostMapping("/v1/payments/{id}/receipt")
+    public ResponseEntity&lt;Void&gt; enqueueReceipt(@PathVariable UUID id) {
+        GenerateReceiptTask task = new GenerateReceiptTask(id, UUID.randomUUID());
+        kafka.send("receipt.generate", id.toString(), Json.write(task));
+        return ResponseEntity.accepted().build();
+    }
+}
+
+public record GenerateReceiptTask(UUID paymentId, UUID taskId) {}</pre>
+<pre>// --- Worker pool: pull, process, ack on success ---
+@Service
+public class ReceiptWorker {
+    @KafkaListener(
+        topics = "receipt.generate",
+        groupId = "receipt-workers",
+        concurrency = "5"
+    )
+    @Transactional
+    public void generate(GenerateReceiptTask task) {
+        inbox.dedup(task.taskId());
+        Payment payment = paymentRepo.findById(task.paymentId()).orElseThrow();
+        byte[] pdf = pdfRenderer.render(payment);
+        objectStore.put("receipts/" + task.paymentId() + ".pdf", pdf);
+    }
+}</pre>` },
   ],
-  figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Work Queue structure">
-<defs><marker id="fig-work-queue-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Work Queue</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-work-queue-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-work-queue-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-work-queue-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Work Queue — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Work Queue pattern — components and data flow in Order Service.` }
-  ],
-  related: [],
-  
-  
-  template: "topology",
-  sim: () => ({
-    note: `Explore Work Queue in the payment platform.`,
-    toggles: [{ key: "fix", label: "Apply Work Queue", kind: "ok", value: false }],
-    nodes: (ctx) => [
-      { id: "c", x: 160, y: 280, title: "Client", color: C.client },
-      { id: "o", x: 400, y: 200, title: "Order", color: C.service, active: true },
-      { id: "g", x: 640, y: 280, title: "Gateway", color: C.gateway },
-      { id: "l", x: 500, y: 400, title: "Ledger", color: C.ledger, value: ctx.toggles.fix ? "ok" : "?" },
-      { id: "q", x: 840, y: 200, title: "Queue", color: C.queue },
-    ],
-    edges: (ctx) => [
-      { from: "c", to: "o", active: true },
-      { from: "o", to: "g", active: ctx.toggles.fix },
-      { from: "g", to: "l", active: ctx.toggles.fix },
-      { from: "l", to: "q", active: ctx.toggles.fix, label: "Work Queue" },
-    ],
-    activeEdge: (ctx, t) => ctx.toggles.fix ? { from: "l", to: "q" } : { from: "c", to: "o" },
-    status: (ctx) => ({ text: ctx.toggles.fix ? "Work Queue in path" : "pattern absent", cls: ctx.toggles.fix ? "ok" : "warn" }),
-  }),
+  related: ["point-to-point", "pub-sub-pattern", "dead-letter-pattern", "backpressure-pattern", "api-idempotency"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
+
 export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
+  return createTopicSim("work-queue", stage, panel, stageEl);
 }

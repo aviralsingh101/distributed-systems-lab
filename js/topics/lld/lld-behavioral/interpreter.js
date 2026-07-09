@@ -1,7 +1,27 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { stateMachineTemplate } from "../../../sim/templates/index.js";
+
+const AST_SVG = `<svg viewBox="0 0 560 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Interpreter AST">
+  <defs><marker id="fig-interpreter-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
+  <rect x="220" y="14" width="120" height="40" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
+  <text x="280" y="34" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">And</text>
+  <text x="280" y="47" text-anchor="middle" fill="#93a1bd" font-size="8" font-family="system-ui">(nonterminal)</text>
+  <rect x="70" y="100" width="150" height="42" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.4"/>
+  <text x="145" y="120" text-anchor="middle" fill="#cdd6e8" font-size="9" font-family="system-ui">GreaterThan</text>
+  <text x="145" y="134" text-anchor="middle" fill="#93a1bd" font-size="8" font-family="ui-monospace,monospace">amount &gt; 1000</text>
+  <rect x="340" y="100" width="150" height="42" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.4"/>
+  <text x="415" y="120" text-anchor="middle" fill="#cdd6e8" font-size="9" font-family="system-ui">Equals</text>
+  <text x="415" y="134" text-anchor="middle" fill="#93a1bd" font-size="8" font-family="ui-monospace,monospace">country == "US"</text>
+  <rect x="70" y="164" width="150" height="30" rx="5" fill="#1a2236" stroke="#3ddc97" stroke-width="1.2"/>
+  <text x="145" y="184" text-anchor="middle" fill="#93a1bd" font-size="8" font-family="ui-monospace,monospace">Var(amount) / Const(1000)</text>
+  <rect x="340" y="164" width="150" height="30" rx="5" fill="#1a2236" stroke="#3ddc97" stroke-width="1.2"/>
+  <text x="415" y="184" text-anchor="middle" fill="#93a1bd" font-size="8" font-family="ui-monospace,monospace">Var(country) / Const(US)</text>
+  <line x1="255" y1="54" x2="160" y2="98" stroke="#5b9dff" stroke-width="1.3" marker-end="url(#fig-interpreter-arr)"/>
+  <line x1="305" y1="54" x2="400" y2="98" stroke="#5b9dff" stroke-width="1.3" marker-end="url(#fig-interpreter-arr)"/>
+  <line x1="145" y1="142" x2="145" y2="162" stroke="#3ddc97" stroke-width="1.2" marker-end="url(#fig-interpreter-arr)"/>
+  <line x1="415" y1="142" x2="415" y2="162" stroke="#3ddc97" stroke-width="1.2" marker-end="url(#fig-interpreter-arr)"/>
+  <text x="280" y="80" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">interpret(context) recurses down the tree</text>
+</svg>`;
 
 const topic = makeTopic({
   id: "interpreter",
@@ -10,74 +30,102 @@ const topic = makeTopic({
   track: "lld",
   tier: "hidden-gem",
   archetype: "pattern",
-  oneliner: `Grammar as class hierarchy.`,
+  oneliner: `Model a small language's grammar as a class per rule, then evaluate sentences by walking the resulting tree of expression objects.`,
   sections: [
-    { title: `Motivation`, body: `<p>Grammar as class hierarchy.</p>
-<p>Without <b>Interpreter</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Interpreter</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Interpreter</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Interpreter</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Interpreter</b> changes to production:</p>
+    { title: `Intent`, body: `<p><b>Interpreter</b> defines a representation for a simple language's grammar, plus an interpreter that evaluates sentences written in it. Each grammar rule becomes a class, and a sentence becomes a tree of those objects (an abstract syntax tree) that you evaluate by recursion.</p>
+<p>It shines for small, embedded rule languages. A promotions engine might let ops define eligibility as <code>amount &gt; 1000 AND country == "US"</code>. Rather than hard-coding that in Java, you represent each operator as an expression object and evaluate the tree against each payment.</p>
+<pre>// --- Abstract expression: every rule implements interpret ---
+public interface PaymentExpression {
+    boolean interpret(PaymentContext context);
+}
+
+public record PaymentContext(Money amount, String country, String merchantId) {}</pre>` },
+    { title: `Participants and structure`, figureAfter: "interpreter-ast", body: `<p>Interpreter is <b>Composite applied to a grammar</b>:</p>
 <ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
+<li><b>Abstract Expression</b> — declares <code>interpret(context)</code>.</li>
+<li><b>Terminal Expression</b> — leaves that need no sub-parts: <code>Variable("amount")</code>, <code>Constant(1000)</code>.</li>
+<li><b>Nonterminal Expression</b> — composite rules holding sub-expressions: <code>And</code>, <code>GreaterThan</code>, <code>Equals</code>, whose <code>interpret</code> combines the results of their children.</li>
+<li><b>Context</b> — the input the sentence is evaluated against (the payment's fields).</li>
 </ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Interpreter</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<pre>// --- Terminal expressions ---
+public final class AmountVariable implements PaymentExpression {
+    @Override
+    public boolean interpret(PaymentContext ctx) {
+        throw new UnsupportedOperationException("Variable is not boolean");
+    }
+    public Money value(PaymentContext ctx) { return ctx.amount(); }
+}
+
+public final class CountryVariable implements PaymentExpression {
+    public String value(PaymentContext ctx) { return ctx.country(); }
+    @Override public boolean interpret(PaymentContext ctx) {
+        throw new UnsupportedOperationException("Variable is not boolean");
+    }
+}
+
+// --- Nonterminal: GreaterThan(amount, 1000) ---
+public final class GreaterThan implements PaymentExpression {
+    private final AmountVariable left;
+    private final long thresholdCents;
+
+    public GreaterThan(long thresholdCents) {
+        this.left = new AmountVariable();
+        this.thresholdCents = thresholdCents;
+    }
+
+    @Override
+    public boolean interpret(PaymentContext ctx) {
+        return left.value(ctx).minorUnits() &gt; thresholdCents;
+    }
+}</pre>
+<p>The tree structure mirrors the grammar, so evaluating a rule is a depth-first walk that bottoms out at the terminals.</p>` },
+    { title: `Implementation flow`, body: `<p>You build the AST, then interpret it against each context:</p>
+<ol>
+<li>Construct the tree: <code>new And(new GreaterThan(1000_00), new Equals("US"))</code>.</li>
+<li>Evaluate: <code>rule.interpret(new PaymentContext(Money.of(1500_00, "USD"), "US", "m-1"))</code>.</li>
+<li><code>And.interpret</code> recurses into both children; <code>GreaterThan</code> reads <code>amount</code> from the context and compares; the booleans bubble back up.</li>
+</ol>
+<pre>public final class Equals implements PaymentExpression {
+    private final String expectedCountry;
+    public Equals(String expectedCountry) { this.expectedCountry = expectedCountry; }
+
+    @Override
+    public boolean interpret(PaymentContext ctx) {
+        return expectedCountry.equals(ctx.country());
+    }
+}
+
+public final class And implements PaymentExpression {
+    private final PaymentExpression left;
+    private final PaymentExpression right;
+
+    public And(PaymentExpression left, PaymentExpression right) {
+        this.left = left;
+        this.right = right;
+    }
+
+    @Override
+    public boolean interpret(PaymentContext ctx) {
+        return left.interpret(ctx) &amp;&amp; right.interpret(ctx);
+    }
+}
+
+// Build and evaluate: amount &gt; 1000 AND country == "US"
+PaymentExpression promoRule = new And(
+    new GreaterThan(1000_00),
+    new Equals("US")
+);
+boolean eligible = promoRule.interpret(
+    new PaymentContext(Money.of(1500_00, "USD"), "US", "m-42"));</pre>
+<p>Note the pattern covers <em>representation and evaluation</em>, not parsing — turning the raw string into the tree is a separate concern (a hand-written parser or a config format).</p>` },
+    { title: `Trade-offs and boundaries`, body: `<p>Adding a new operator is easy — one more expression class — which makes the grammar pleasantly extensible. But the pattern does not scale: every rule is a class, so a rich grammar explodes into dozens of them, and tree-walking evaluation is slow. Use it only for <b>small, stable</b> DSLs (rule engines, query filters, feature flags); for a real programming language, use a proper parser producing an AST that a <b>Visitor</b> walks.</p>
+<p>The <b>Specification</b> pattern is a focused, practical cousin: it is essentially an Interpreter restricted to composable boolean business rules (<code>and</code>, <code>or</code>, <code>not</code>) with a friendlier fluent API.</p>` },
   ],
   figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Interpreter structure">
-<defs><marker id="fig-interpreter-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Interpreter</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-interpreter-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-interpreter-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-interpreter-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Interpreter — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Interpreter pattern — components and data flow in Order Service.` }
+    { id: "interpreter-ast", svg: AST_SVG, caption: "The rule amount > 1000 AND country == \"US\" as a tree of expression objects, each implementing interpret(context)." },
   ],
-  related: [],
-  
-  
-  template: "stateMachine",
-  sim: () => ({
-    note: `Explore Interpreter in the payment platform.`,
-    toggles: [{ key: "fix", label: "Valid transitions only", kind: "ok", value: false }],
-    states: (ctx) => [
-      { id: "pending", label: "Pending", x: 200, y: 280, color: C.service },
-      { id: "active", label: "Interpreter", x: 500, y: 280, color: C.accent, good: true },
-      { id: "done", label: "Settled", x: 800, y: 280, color: C.ok, good: true },
-      { id: "bad", label: "Invalid", x: 500, y: 420, color: C.err, bad: true },
-    ],
-    currentState: (ctx, t) => {
-      if (!ctx.toggles.fix && (t % 6) > 4) return "bad";
-      return ["pending", "active", "done"][Math.floor((t * 0.35) % 3)];
-    },
-    transitions: [{ from: "pending", to: "active", label: "apply" }, { from: "active", to: "done", label: "commit" }],
-    status: (ctx) => ({ text: ctx.toggles.fix ? "state machine guards flow" : "illegal states possible", cls: ctx.toggles.fix ? "ok" : "err" }),
-  }),
+  related: ["specification-pattern", "composite", "visitor", "iterator"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

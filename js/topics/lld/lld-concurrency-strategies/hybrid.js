@@ -1,86 +1,75 @@
 // @article-v2
-import { mountSimulation } from "../../../sim/controls.js";
-import { C, clamp } from "../../../sim/primitives.js";
+// @sim-lab
+import { createTopicSim } from "../../../sim/lab/registry.js";
 
 export const meta = { id: "hybrid", title: "Hybrid Locking", category: "opt-pess" };
 
 export const content = {
-  oneliner: `Switch strategy by contention.`,
-  archetype: "pattern",
+  oneliner: `Neither optimistic nor pessimistic is best everywhere — choose per operation, or switch adaptively as measured contention rises.`,
+  archetype: "tradeoff",
   sections: [
-    { title: `Motivation`, body: `<p>Switch strategy by contention.</p>
-<p>Without <b>Hybrid Locking</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>Concurrency control prevents conflicting wallet updates. Row-level locks block concurrent writers; version columns enable optimistic retry; distributed locks (Redis, etcd) coordinate cross-service critical sections with fencing tokens.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Hybrid Locking</b>:</p>
+    { title: `Why one strategy is not enough`, body: `<p>Optimistic and pessimistic concurrency solve the same problem — preventing lost updates — with opposite bets. Optimistic wins when conflicts are rare (no locks, high throughput, retries cheap); pessimistic wins when conflicts are common (serialize up front, no retry thrash). Real systems have <b>both</b> regimes at once: most wallets are cold and see one writer, while a handful of hot wallets or a flash-sale SKU see fierce contention. A <b>hybrid</b> strategy applies the right control to each case instead of forcing a single global choice.</p>` },
+    { title: `Optimistic vs pessimistic, side by side`, body: `<ul>
+<li><b>Locking</b> — optimistic takes none until commit; pessimistic locks the row before the write.</li>
+<li><b>Conflict handling</b> — optimistic detects at commit and retries; pessimistic prevents by blocking.</li>
+<li><b>Best under</b> — optimistic: low contention, long think time; pessimistic: high contention, short critical section.</li>
+<li><b>Failure mode</b> — optimistic: retry livelock on hot rows; pessimistic: blocking, deadlocks, pool exhaustion if a lock is held too long.</li>
+<li><b>Cost profile</b> — optimistic wastes work on conflict; pessimistic wastes throughput on serialization.</li>
+</ul>` },
+    { title: `Ways to combine them`, body: `<p>Several hybrid designs are common:</p>
 <ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
+<li><b>Static per-operation choice</b> — pessimistic (<code>SELECT ... FOR UPDATE</code>) for the few known hot paths (balance debit on a shared wallet), optimistic version checks for the many cold ones.</li>
+<li><b>Adaptive escalation</b> — start optimistic; if a row's retry/conflict rate crosses a threshold, escalate that row (or key range) to pessimistic locking so hot rows stop thrashing while cold rows stay lock-free.</li>
+<li><b>Optimistic-then-lock</b> — try the CAS update once; on the zero-row conflict, re-run under an explicit lock so the retry is guaranteed to make progress instead of colliding again.</li>
+<li><b>Bounded optimistic retries → fallback</b> — allow N optimistic attempts, then fall back to a lock or a serialized queue for the remainder.</li>
 </ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Hybrid Locking</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Hybrid Locking</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Hybrid Locking</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<pre>// Hybrid: optimistic first, escalate to pessimistic on hot wallet
+@Service
+public class HybridWalletService {
+    private final WalletRepository repo;
+    private final ConcurrentHashMap&lt;String, AtomicInteger&gt; conflictCounts
+        = new ConcurrentHashMap&lt;&gt;();
+    private static final int ESCALATION_THRESHOLD = 3;
+
+    public void debit(String walletId, long amountCents) {
+        AtomicInteger conflicts = conflictCounts
+            .computeIfAbsent(walletId, k -&gt; new AtomicInteger());
+
+        if (conflicts.get() &gt;= ESCALATION_THRESHOLD) {
+            debitPessimistic(walletId, amountCents);
+        } else {
+            try {
+                debitOptimistic(walletId, amountCents);
+                conflicts.set(0);
+            } catch (OptimisticLockException e) {
+                if (conflicts.incrementAndGet() &gt;= ESCALATION_THRESHOLD) {
+                    debitPessimistic(walletId, amountCents);
+                } else {
+                    throw e; // caller retries
+                }
+            }
+        }
+    }
+
+    @Transactional
+    void debitOptimistic(String walletId, long amountCents) {
+        Wallet w = repo.findById(walletId).orElseThrow();
+        w.setBalanceCents(w.getBalanceCents() - amountCents);
+        repo.save(w); // @Version check at flush
+    }
+
+    @Transactional
+    void debitPessimistic(String walletId, long amountCents) {
+        Wallet w = repo.findByIdForUpdate(walletId).orElseThrow();
+        w.setBalanceCents(w.getBalanceCents() - amountCents);
+    }
+}</pre>` },
+    { title: `Making it work in practice`, body: `<p>Adaptive schemes need <b>signals</b>: track conflict rate, retry count, and lock-wait time per key or per operation, and drive the switch from those metrics. Keep the fallback deterministic so a request cannot bounce between strategies forever — cap retries, then commit to locking. Route by contention, not by convenience: a debit on a shared merchant float should lock; a user editing their own profile should stay optimistic.</p>
+<p>The trade-off of hybrid itself is <b>complexity</b>: two code paths, thresholds to tune, and harder reasoning and testing. Adopt it only once a single strategy demonstrably fails — you have measured either optimistic retry storms on hot rows or pessimistic blocking on cold ones. Otherwise pick the simpler strategy that matches your dominant contention profile and revisit when the data says so.</p>` },
   ],
-  figures: [
-    { id: "dist-lock", svg: `<svg viewBox="0 0 400 110" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Distributed lock">
-<rect x="40" y="38" width="70" height="36" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
-<text x="75" y="60" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Pod A</text>
-<rect x="40" y="78" width="70" height="28" rx="6" fill="#1a2236" stroke="#ff5c6c" stroke-width="1.5"/>
-<text x="75" y="86" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Pod B</text><text x="75" y="106" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">stale</text>
-<rect x="160" y="48" width="90" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="205" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Redis Lock</text><text x="205" y="82" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">token=42</text>
-<rect x="290" y="38" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="335" y="60" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger</text>
-<text x="200" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Only token holder may write</text>
-</svg>`, caption: `Distributed lock: SET key NX PX with unique token; stale holder rejected via fencing token.` }
-  ],
-  related: [],
+  related: ["optimistic", "pessimistic", "optimistic-locking-schema", "transactional-boundaries"],
 };
 
 export function createSimulation(stage, panel, stageEl) {
-  return mountSimulation(stage, panel, stageEl, {
-    note: "Adaptive controller routes each key to the better strategy.",
-    params: [{ key: "cont", label: "Contention", min: 0, max: 100, step: 5, value: 20, unit: "%", live: true }],
-    toggles: [{ key: "force", label: "Force optimistic (no switching)", kind: "warn", value: false }],
-    frame(ctx, t) {
-      const d = ctx.d; const cont = ctx.params.cont; const force = ctx.toggles.force;
-      const useLock = !force && cont >= 50;
-      // contention gauge
-      d.gauge(360, 70, 280, 14, cont / 100, { color: cont >= 50 ? C.err : C.ok, label: "observed contention", value: cont + "%" });
-
-      const ctrl = { x: 500, y: 180 };
-      d.node(ctrl.x - 90, ctrl.y - 30, 180, 60, { title: "adaptive controller", color: C.accent, active: true, value: useLock ? "→ pessimistic" : "→ optimistic" });
-
-      const occ = { x: 260, y: 360 }, pess = { x: 740, y: 360 };
-      d.node(occ.x - 90, occ.y - 34, 180, 68, { title: "Optimistic (CAS)", color: C.service, state: !useLock ? "ok" : "dim", active: !useLock });
-      d.node(pess.x - 90, pess.y - 34, 180, 68, { title: "Pessimistic (lock)", color: C.gateway, state: useLock ? "ok" : "dim", active: useLock });
-      d.arrow(ctrl.x - 40, ctrl.y + 30, occ.x + 20, occ.y - 34, { color: !useLock ? C.service : C.faint, width: !useLock ? 2.4 : 1, dashed: useLock });
-      d.arrow(ctrl.x + 40, ctrl.y + 30, pess.x - 20, pess.y - 34, { color: useLock ? C.gateway : C.faint, width: useLock ? 2.4 : 1, dashed: !useLock });
-
-      // throughput model: OCC ~ 1 - cont; LOCK ~ 0.55 steady; hybrid picks best
-      const occT = clamp(1 - cont / 100 * 1.1);
-      const lockT = 0.55;
-      const eff = force ? occT : Math.max(occT, useLock ? lockT : occT);
-      d.vbar(occ.x - 20, 500, 40, 90, occT, 1, { color: C.service });
-      d.text(occ.x, 512, "OCC tput", { size: 11, align: "center", color: C.muted });
-      d.vbar(pess.x - 20, 500, 40, 90, lockT, 1, { color: C.gateway });
-      d.text(pess.x, 512, "lock tput", { size: 11, align: "center", color: C.muted });
-      d.vbar(ctrl.x - 26, 500, 52, 90, eff, 1, { color: C.ok, value: Math.round(eff * 100) + "%" });
-      d.text(ctrl.x, 512, "effective", { size: 11, align: "center", color: C.muted });
-
-      ctx.setStatus(force ? (cont >= 50 ? "forced optimistic — retries hurting" : "optimistic — fine") : (useLock ? "escalated to pessimistic lock" : "optimistic (low contention)"), force && cont >= 50 ? "warn" : "ok");
-    },
-  });
+  return createTopicSim("hybrid", stage, panel, stageEl);
 }

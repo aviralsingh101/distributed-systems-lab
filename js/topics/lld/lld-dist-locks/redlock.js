@@ -1,77 +1,123 @@
 // @article-v2
-import { mountSimulation } from "../../../sim/controls.js";
-import { C, phaseOf } from "../../../sim/primitives.js";
+// @sim-lab
+import { createTopicSim } from "../../../sim/lab/registry.js";
 
 export const meta = { id: "redlock", title: "Redlock Debate", category: "dist-lock" };
 
+const QUORUM_SVG = `<svg viewBox="0 0 720 180" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Redlock five-node quorum acquire">
+  <defs><marker id="fig-redlock-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
+  <rect x="20" y="70" width="120" height="44" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
+  <text x="80" y="90" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Client</text>
+  <text x="80" y="105" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">SET NX on all 5</text>
+  <g font-family="system-ui" font-size="10">
+    <rect x="300" y="8" width="90" height="30" rx="5" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/><text x="345" y="27" text-anchor="middle" fill="#3ddc97">R1 ok</text>
+    <rect x="300" y="46" width="90" height="30" rx="5" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/><text x="345" y="65" text-anchor="middle" fill="#3ddc97">R2 ok</text>
+    <rect x="300" y="84" width="90" height="30" rx="5" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/><text x="345" y="103" text-anchor="middle" fill="#3ddc97">R3 ok</text>
+    <rect x="300" y="122" width="90" height="30" rx="5" fill="#1a2236" stroke="#ff6b6b" stroke-width="1.5"/><text x="345" y="141" text-anchor="middle" fill="#ff6b6b">R4 down</text>
+    <rect x="300" y="160" width="90" height="16" rx="4" fill="#1a2236" stroke="#ff6b6b" stroke-width="1.2"/><text x="345" y="172" text-anchor="middle" fill="#ff6b6b">R5 slow</text>
+  </g>
+  <line x1="140" y1="88" x2="298" y2="23" stroke="#3ddc97" stroke-width="1.2" marker-end="url(#fig-redlock-arr)"/>
+  <line x1="140" y1="90" x2="298" y2="61" stroke="#3ddc97" stroke-width="1.2" marker-end="url(#fig-redlock-arr)"/>
+  <line x1="140" y1="92" x2="298" y2="99" stroke="#3ddc97" stroke-width="1.2" marker-end="url(#fig-redlock-arr)"/>
+  <line x1="140" y1="96" x2="298" y2="137" stroke="#ff6b6b" stroke-width="1" stroke-dasharray="3 3" marker-end="url(#fig-redlock-arr)"/>
+  <text x="560" y="80" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">3 of 5 = majority</text>
+  <text x="560" y="98" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">lock granted if quorum</text>
+  <text x="560" y="114" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">acquired within TTL</text>
+</svg>`;
+
 export const content = {
-  oneliner: `Quorum locks and their critics.`,
+  oneliner: `Redis's multi-node lock algorithm — acquire on a majority of independent nodes — and the well-known critique that it is still unsafe for correctness without fencing.`,
   archetype: "pattern",
-  sections: [
-    { title: `Motivation`, body: `<p>Quorum locks and their critics.</p>
-<p>Without <b>Redlock Debate</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>Concurrency control prevents conflicting wallet updates. Row-level locks block concurrent writers; version columns enable optimistic retry; distributed locks (Redis, etcd) coordinate cross-service critical sections with fencing tokens.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Redlock Debate</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Redlock Debate</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Redlock Debate</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Redlock Debate</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
-  ],
   figures: [
-    { id: "dist-lock", svg: `<svg viewBox="0 0 400 110" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Distributed lock">
-<rect x="40" y="38" width="70" height="36" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
-<text x="75" y="60" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Pod A</text>
-<rect x="40" y="78" width="70" height="28" rx="6" fill="#1a2236" stroke="#ff5c6c" stroke-width="1.5"/>
-<text x="75" y="86" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Pod B</text><text x="75" y="106" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">stale</text>
-<rect x="160" y="48" width="90" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="205" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Redis Lock</text><text x="205" y="82" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">token=42</text>
-<rect x="290" y="38" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="335" y="60" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger</text>
-<text x="200" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Only token holder may write</text>
-</svg>`, caption: `Distributed lock: SET key NX PX with unique token; stale holder rejected via fencing token.` }
+    { id: "redlock-quorum", svg: QUORUM_SVG, caption: "Redlock acquires the same key on N independent masters and considers the lock held only if a majority (here 3 of 5) grant it before the TTL, using the elapsed time to shrink the validity window." },
   ],
-  related: [],
+  sections: [
+    { title: `Why Redlock exists`, body: `<p>A single-instance Redis lock has an obvious weak point: the whole lock lives on one node, and Redis replication is asynchronous. If the primary dies right after granting a lock but before replicating it, the promoted replica shows the key as free and can grant the same lock again — two holders. <b>Redlock</b>, proposed by Redis's author Salvatore Sanfilippo, tries to remove that single point of failure by spreading the lock across several independent Redis masters.</p>` },
+    { title: `The algorithm, step by step`, figureAfter: "redlock-quorum", body: `<p>You run <b>N independent</b> Redis masters (typically N = 5), with no replication between them. To acquire:</p>
+<ol>
+<li>Record the current time, then try to <code>SET key token NX PX</code> on <em>all N</em> nodes sequentially, using a short per-node timeout so a dead node cannot stall you.</li>
+<li>Count the successes. The lock is considered acquired only if you got it on a <b>majority</b> (⌊N/2⌋ + 1, i.e. 3 of 5) <em>and</em> the total elapsed time is less than the lock TTL.</li>
+<li>The effective validity is the TTL minus the elapsed acquisition time (and minus a clock-drift margin). If that remaining window is positive, you hold the lock; otherwise you failed.</li>
+<li>On failure — or on release — send the token-checked delete to <em>all</em> N nodes, including ones you thought failed.</li>
+</ol>
+<p>A majority requirement means a minority of crashed or partitioned nodes cannot grant the lock to a second client.</p>
+<pre>// Redlock attempt across N independent Redis masters
+public final class Redlock {
+    private final List&lt;JedisPool&gt; nodes;
+    private final int quorum;
+    private final long leaseMs;
+    private final long acquireTimeoutMs;
+
+    public Redlock(List&lt;JedisPool&gt; nodes, long leaseMs) {
+        this.nodes = nodes;
+        this.quorum = nodes.size() / 2 + 1;
+        this.leaseMs = leaseMs;
+        this.acquireTimeoutMs = leaseMs / 3;
+    }
+
+    public Optional&lt;RedlockHandle&gt; tryAcquire(String resource) {
+        String token = UUID.randomUUID().toString();
+        String key = "lock:" + resource;
+        long start = System.nanoTime();
+        int successes = 0;
+
+        for (JedisPool pool : nodes) {
+            try (Jedis jedis = pool.getResource()) {
+                SetParams p = SetParams.setParams().nx().px(leaseMs);
+                if ("OK".equals(jedis.set(key, token, p))) successes++;
+            } catch (JedisConnectionException ignored) { /* node down */ }
+        }
+
+        long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+        long validityMs = leaseMs - elapsedMs - 50; // clock drift margin
+        if (successes &gt;= quorum &amp;&amp; validityMs &gt; 0) {
+            return Optional.of(new RedlockHandle(token, validityMs));
+        }
+        // Failed — unlock all nodes (including ones we thought failed)
+        releaseAll(resource, token);
+        return Optional.empty();
+    }
+
+    private void releaseAll(String resource, String token) {
+        String script = "if redis.call('get',KEYS[1])==ARGV[1] then return redis.call('del',KEYS[1]) else return 0 end";
+        for (JedisPool pool : nodes) {
+            try (Jedis jedis = pool.getResource()) {
+                jedis.eval(script, List.of("lock:" + resource), List.of(token));
+            } catch (JedisConnectionException ignored) {}
+        }
+    }
+}
+
+// Charge retry worker — lock is best-effort, not the correctness guarantee
+public class PaymentChargeWorker {
+    private final Redlock redlock;
+    private final PaymentGateway gateway;
+
+    public ChargeResult chargeWithLock(String orderId, ChargeRequest req) {
+        return redlock.tryAcquire("charge:" + orderId)
+            .map(h -&gt; {
+                try {
+                    return gateway.charge(req); // still needs idempotency key
+                } finally {
+                    redlock.releaseAll("charge:" + orderId, h.token());
+                }
+            })
+            .orElseThrow(() -&gt; new BusyException(orderId));
+    }
+}</pre>` },
+    { title: `Kleppmann's critique`, body: `<p>Martin Kleppmann's widely-cited analysis argues Redlock solves the wrong half of the problem. Its extra machinery hardens against <em>node failures</em>, but a lock's correctness ultimately depends on <b>timing assumptions</b>, and distributed systems violate those routinely:</p>
+<ul>
+<li><b>Process pauses.</b> A holder can be frozen by a stop-the-world GC pause, page fault, or VM migration for seconds. By the time it wakes, its lease has expired and another client legitimately holds the lock — Redlock's quorum does nothing to prevent the two overlapping.</li>
+<li><b>Clock jumps.</b> Redlock's validity calculation relies on each node's monotonic sense of expiry; an administrator NTP step or a bad clock can expire keys early or late, breaking the majority reasoning.</li>
+<li><b>Network delays.</b> A packet delayed past the TTL means a client's write lands after its lease is gone.</li>
+</ul>
+<p>His conclusion: if you use a lock merely for <em>efficiency</em> (avoid duplicate work), a single Redis instance is fine and Redlock is overkill. If you use it for <em>correctness</em> (never two writers), no lock alone is enough — you must add a <b>fencing token</b> checked by the resource.</p>` },
+    { title: `Fencing is the real fix`, body: `<p>The durable resolution both sides accept is fencing. The lock service returns a monotonically increasing token with each grant; every write to the protected resource carries its token, and the resource <b>rejects any write whose token is lower than the highest it has already accepted</b>. A paused old holder that wakes up and writes is stopped at the resource, because its token is now stale — regardless of what any lock server believed. Redis does not naturally emit such a monotonic fence, which is a key part of the argument for using a consensus system (ZooKeeper's <code>zxid</code>, etcd's revision) when correctness is on the line.</p>` },
+    { title: `What to take away`, body: `<p>Redlock is a reasonable engineering trade-off for mutual exclusion under node failure, and it is genuinely stronger than a lone instance against failover. But treat it as best-effort: it does not make lock-based exclusion <em>safe</em> under the pauses and clock issues that real systems exhibit. For anything that must never double-apply — moving money, mutating a shared file — enforce correctness at the resource with fencing and idempotency, and let the lock be the fast path, not the guarantee.</p>` },
+  ],
+  related: ["redis-lock", "fencing-tokens", "lease-expiration", "etcd-lease", "zookeeper-lock", "gc-pause"],
 };
 
 export function createSimulation(stage, panel, stageEl) {
-  return mountSimulation(stage, panel, stageEl, {
-    note: "Client must acquire a majority (3 of 5) Redis nodes.",
-    toggles: [{ key: "down", label: "One node down", kind: "warn", value: false }],
-    frame(ctx, t) {
-      const d = ctx.d; const down = ctx.toggles.down;
-      const client = { x: 500, y: 470 };
-      const N = 5, cx = 500, cy = 180, R = 200;
-      const ph = phaseOf(t, [2.2, 1.6]);
-      let acquired = 0;
-      for (let i = 0; i < N; i++) {
-        const ang = -Math.PI / 2 + (i / N) * Math.PI * 2;
-        const x = cx + Math.cos(ang) * R, y = cy + Math.sin(ang) * R * 0.7;
-        const isDown = down && i === 2;
-        const got = !isDown && (ph.i >= 1 || ph.p * N > i);
-        if (got) acquired++;
-        d.arrow(client.x, client.y, x, y, { color: isDown ? C.err : got ? C.ok : C.faint, width: got ? 2 : 1, dashed: !got, head: false, alpha: got ? 0.9 : 0.3 });
-        d.node(x - 46, y - 24, 92, 48, { title: "redis " + (i + 1), color: C.gateway, state: isDown ? "err" : got ? "ok" : "dim", value: isDown ? "DOWN" : got ? "locked" : "" });
-      }
-      d.node(client.x - 70, client.y - 26, 140, 52, { title: "Client", color: C.service, active: true, value: acquired + "/5 acquired" });
-      const majority = acquired >= 3;
-      d.badge(500, 528, majority ? "majority ✓ lock held" : "no majority — release & retry", { color: majority ? C.ok : C.err, align: "center" });
-      ctx.setStatus(down ? "1 node down — majority still holds" : "lock held on majority", majority ? "ok" : "err");
-    },
-  });
+  return createTopicSim("redlock", stage, panel, stageEl);
 }

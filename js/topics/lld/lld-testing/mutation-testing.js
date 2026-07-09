@@ -1,7 +1,5 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { flowTemplate } from "../../../sim/templates/index.js";
 
 const topic = makeTopic({
   id: "mutation-testing",
@@ -10,85 +8,95 @@ const topic = makeTopic({
   track: "lld",
   tier: "hidden-gem",
   archetype: "pattern",
-  oneliner: `Kill mutants to measure tests.`,
+  oneliner: `Deliberately introduce small bugs into your code and measure how many your test suite catches — a test of your tests, not your code.`,
   sections: [
-    { title: `Motivation`, body: `<p>Kill mutants to measure tests.</p>
-<p>Without <b>Mutation Testing</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Mutation Testing</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Mutation Testing</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Mutation Testing</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Mutation Testing</b> changes to production:</p>
+    { title: `Testing the tests`, body: `<p>Line coverage lies. A test can <em>execute</em> a line without asserting anything about it, so 90% coverage can hide a suite that would not notice if the code were wrong. <b>Mutation testing</b> measures what coverage cannot: whether your assertions are strong enough to <em>detect</em> defects.</p>
+<p>The idea is to systematically inject small faults — <b>mutants</b> — into the production code, one at a time, and re-run the tests against each mutated version. If a test fails, the mutant is <b>killed</b> (good — your suite caught the bug). If all tests still pass, the mutant <b>survives</b> (bad — a real bug of that shape would ship unnoticed).</p>` },
+    { title: `Mutation operators and the flow`, body: `<p>A mutation-testing tool (Stryker, <b>PIT</b>, mutmut, Cosmic Ray) applies mechanical <b>mutation operators</b> to the AST. Typical ones:</p>
 <ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
+<li>Flip a relational operator: <code>a &gt;= b</code> becomes <code>a &gt; b</code>.</li>
+<li>Swap arithmetic: <code>total - fee</code> becomes <code>total + fee</code>.</li>
+<li>Negate a condition, or replace it with <code>true</code>/<code>false</code>.</li>
+<li>Remove a statement (e.g. delete a method call for its side effect).</li>
+<li>Mutate a return or a boundary constant.</li>
 </ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Mutation Testing</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<p>The implementation flow: (1) run the suite once to confirm it is green and to record which tests touch which lines; (2) generate mutants; (3) for each mutant, run only the covering tests; (4) tally kills vs survivors. The headline metric is the <b>mutation score</b> = killed ÷ (total − equivalent).</p>
+<pre>// Production code under test — payment fee rounding
+public final class PaymentFeeCalculator {
+    private final long flatFeeCents;
+    private final double percentageRate;   // e.g. 0.029 for 2.9%
+
+    public PaymentFeeCalculator(long flatFeeCents, double percentageRate) {
+        this.flatFeeCents = flatFeeCents;
+        this.percentageRate = percentageRate;
+    }
+
+    public long computeFeeCents(long amountCents) {
+        if (amountCents &lt;= 0) return 0;
+        long percentageFee = Math.round(amountCents * percentageRate);
+        return flatFeeCents + percentageFee;
+    }
+
+    public boolean allowsOverdraft(long balanceCents, long chargeCents) {
+        return balanceCents &gt;= chargeCents;   // mutant: &gt; instead of &gt;=
+    }
+}</pre>
+<p>PIT mutates bytecode in place and runs only the tests that cover each mutated line, which keeps the loop tractable on a CI machine.</p>` },
+    { title: `JUnit tests and what PIT reveals`, body: `<p>Here is a test suite that covers the fee calculator but leaves boundary gaps PIT will expose:</p>
+<pre>import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
+
+class PaymentFeeCalculatorTest {
+
+    @Test
+    void zeroAmount_returnsZeroFee() {
+        var calc = new PaymentFeeCalculator(30, 0.029);
+        assertEquals(0, calc.computeFeeCents(0));
+    }
+
+    @Test
+    void positiveAmount_includesFlatAndPercentage() {
+        var calc = new PaymentFeeCalculator(30, 0.029);
+        // $10.00 charge: 30¢ flat + 29¢ percentage = 59¢
+        assertEquals(59, calc.computeFeeCents(1000));
+    }
+
+    @Test
+    void exactBalance_allowsCharge() {
+        var calc = new PaymentFeeCalculator(30, 0.029);
+        assertTrue(calc.allowsOverdraft(500, 500));
+    }
+    // MISSING: allowsOverdraft(499, 500) should be false
+}</pre>
+<p>When PIT flips <code>&gt;=</code> to <code>&gt;</code> in <code>allowsOverdraft</code>, all three tests still pass — the mutant <b>survives</b>. The fix is a boundary test:</p>
+<pre>    @Test
+    void balanceOneCentShort_rejectsCharge() {
+        var calc = new PaymentFeeCalculator(30, 0.029);
+        assertFalse(calc.allowsOverdraft(499, 500));
+    }</pre>
+<p>That single test kills the relational-operator mutant. Mutation testing turns "I should add more tests" into "add <em>this</em> assertion at <em>this</em> boundary."</p>` },
+    { title: `Reading survivors, and the costs`, body: `<p>Every <b>surviving mutant</b> is a concrete, actionable gap: "I changed <code>&gt;=</code> to <code>&gt;</code> in the overdraft check and no test complained" tells you to add a boundary test at exactly that limit. This is far more useful than a coverage percentage — it names the missing assertion.</p>
+<pre>// pom.xml — scope PIT to high-value payment modules only
+&lt;plugin&gt;
+  &lt;groupId&gt;org.pitest&lt;/groupId&gt;
+  &lt;artifactId&gt;pitest-maven&lt;/artifactId&gt;
+  &lt;version&gt;1.15.0&lt;/version&gt;
+  &lt;configuration&gt;
+    &lt;targetClasses&gt;
+      &lt;param&gt;com.acme.payments.fee.*&lt;/param&gt;
+      &lt;param&gt;com.acme.payments.wallet.*&lt;/param&gt;
+    &lt;/targetClasses&gt;
+    &lt;targetTests&gt;
+      &lt;param&gt;com.acme.payments.*Test&lt;/param&gt;
+    &lt;/targetTests&gt;
+    &lt;mutationThreshold&gt;80&lt;/mutationThreshold&gt;
+    &lt;threads&gt;4&lt;/threads&gt;
+  &lt;/configuration&gt;
+&lt;/plugin&gt;</pre>
+<p>Two costs to manage. First, <b>speed</b>: naively you run the suite once per mutant, so tools rely on test selection, parallelism, and incremental analysis on changed files only. Second, <b>equivalent mutants</b> — a mutation that produces behaviour indistinguishable from the original (e.g. changing a value that is later overwritten). These can never be killed and must be excluded by hand, which is the main source of toil. Use mutation testing on high-value, logic-dense code — a payment fee/rounding engine, an authorization check — rather than the whole repo, and gate CI on the mutation score of just those critical modules.</p>` },
   ],
-  figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Mutation Testing structure">
-<defs><marker id="fig-mutation-testing-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Mutation Testing</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-mutation-testing-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-mutation-testing-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-mutation-testing-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Mutation Testing — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Mutation Testing pattern — components and data flow in Order Service.` }
-  ],
-  related: [],
-  
-  
-  template: "flow",
-  sim: () => ({
-    note: `Explore Mutation Testing in the payment platform.`,
-    toggles: [{ key: "fix", label: "Apply Mutation Testing", kind: "ok", value: false }],
-    scenario(ctx) {
-      const fix = ctx.toggles.fix;
-      const actors = [
-        { id: "client", label: "Client", color: C.client },
-        { id: "order", label: "Order Service", color: C.service },
-        { id: "ledger", label: "Ledger", color: C.ledger, kind: "db", value: "balance" },
-        { id: "queue", label: "Event Queue", color: C.queue },
-      ];
-      const steps = fix ? [
-        { from: "client", to: "order", label: "pay", good: true },
-        { from: "order", to: "ledger", label: "Mutation Testing ✓", good: true, set: { ledger: "committed" } },
-        { from: "ledger", to: "queue", label: "event", good: true },
-      ] : [
-        { from: "client", to: "order", label: "pay" },
-        { from: "order", to: "ledger", label: "naive write", bad: true, set: { ledger: "risk" } },
-        { from: "order", to: "queue", label: "dual write?", dashed: true, bad: true },
-      ];
-      return {
-        actors, steps, stepDur: 1.2,
-        status: (r) => !r.done ? { text: "processing…", cls: "" }
-          : fix ? { text: "Mutation Testing applied", cls: "ok" } : { text: "pattern missing", cls: "err" },
-      };
-    },
-  }),
+  related: ["property-based-testing", "unit-integration-contract", "tdd-for-lld"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

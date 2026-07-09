@@ -1,7 +1,5 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { tradeoffTemplate } from "../../../sim/templates/index.js";
 
 const topic = makeTopic({
   id: "two-pc-vs-saga-vs-tcc",
@@ -34,46 +32,12 @@ const topic = makeTopic({
 <p>Interview tip: whiteboard the charge flow, mark where <b>2PC vs Saga vs TCC</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
   ],
   figures: [
-    { id: "saga-steps", svg: `<svg viewBox="0 0 520 100" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Saga steps">
-<defs><marker id="fig-two-pc-vs-saga-vs-tcc-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="20" y="35" width="80" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="60" y="57" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Reserve</text>
-<rect x="130" y="35" width="80" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="170" y="57" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Charge</text>
-<rect x="240" y="35" width="80" height="36" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="280" y="57" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ship</text>
-<rect x="350" y="55" width="90" height="30" rx="6" fill="#1a2236" stroke="#ff5c6c" stroke-width="1.5"/>
-<text x="395" y="64" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Compensate</text><text x="395" y="84" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">on failure</text>
-<line x1="100" y1="53" x2="128" y2="53" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-two-pc-vs-saga-vs-tcc-arr)"/>
-<line x1="210" y1="53" x2="238" y2="53" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-two-pc-vs-saga-vs-tcc-arr)"/>
-<text x="260" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Each step has a matching undo action</text>
-</svg>`, caption: `Saga: forward steps with compensating transactions on failure — no global lock.` }
+    { id: "comparison", svg: `<svg viewBox="0 0 480 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="2PC vs Saga vs TCC comparison"> <rect x="40" y="35" width="160" height="50" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/> <text x="120" y="54" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Option A</text><text x="120" y="70" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pros / cons</text> <rect x="280" y="35" width="160" height="50" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/> <text x="360" y="54" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Option B</text><text x="360" y="70" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pros / cons</text> <text x="240" y="105" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">vs</text> </svg>`, caption: `2PC vs Saga vs TCC: tradeoff comparison — when to choose each approach.` },
   ],
   related: [],
   
   
-  template: "tradeoff",
-  sim: () => ({
-    note: `Explore 2PC vs Saga vs TCC in the payment platform.`,
-    toggleLabel: "Switch approach",
-    labelA: "Without pattern",
-    labelB: "With 2PC vs Saga vs TCC",
-    sideA: () => ({ nodes: [
-      { title: "Monolith path", active: true },
-      { title: "Tight coupling", value: "risk" },
-      { title: "Scale wall", value: "soon" },
-    ]}),
-    sideB: () => ({ nodes: [
-      { title: "Clear boundary", active: true },
-      { title: "2PC vs Saga vs TCC", value: "applied" },
-      { title: "Independent scale", value: "ok" },
-    ]}),
-    status: (ctx, t, useB) => ({ text: useB ? "2PC vs Saga vs TCC — better fit" : "naive — hits limits", cls: useB ? "ok" : "warn" }),
-  }),
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

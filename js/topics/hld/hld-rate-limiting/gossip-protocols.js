@@ -1,5 +1,4 @@
 // @article-v2
-import { mountSimulation } from "../../../sim/controls.js";
 import { C, cycle } from "../../../sim/primitives.js";
 
 export const meta = { id: "gossip-protocols", title: "Gossip Protocols", category: "prod-eng" };
@@ -33,76 +32,8 @@ export const content = {
 <p>Interview tip: whiteboard the charge flow, mark where <b>Gossip Protocols</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
   ],
   figures: [
-    { id: "request-path", svg: `<svg viewBox="0 0 640 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Gossip Protocols in request path">
-<defs><marker id="fig-gossip-protocols-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="10" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="46" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Client</text>
-<rect x="100" y="40" width="88" height="36" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="144" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Gossip Protoc…</text><text x="144" y="72" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">this topic</text>
-<rect x="206" y="40" width="80" height="36" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
-<text x="246" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Order</text>
-<rect x="304" y="40" width="84" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="346" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Gateway</text>
-<rect x="406" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="442" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger</text>
-<rect x="496" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="532" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Queue</text>
-<line x1="82" y1="58" x2="98" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-gossip-protocols-arr)"/>
-<line x1="188" y1="58" x2="204" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-gossip-protocols-arr)"/>
-<line x1="286" y1="58" x2="302" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-gossip-protocols-arr)"/>
-<line x1="388" y1="58" x2="404" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-gossip-protocols-arr)"/>
-<line x1="478" y1="58" x2="494" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-gossip-protocols-arr)"/>
-<text x="320" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">HTTPS request flow — Gossip Protocols</text>
-</svg>`, caption: `Gossip Protocols on the payment request path — from client charge to Ledger commit.` },
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Gossip Protocols structure">
-<defs><marker id="fig-gossip-protocols-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Gossip Protocols</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-gossip-protocols-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-gossip-protocols-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-gossip-protocols-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Gossip Protocols — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Gossip Protocols pattern — components and data flow in Order Service.` }
+    { id: "architecture", svg: `<svg viewBox="0 0 460 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Gossip Protocols architecture"> <text x="230" y="18" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">System components</text> <rect x="30" y="40" width="120" height="44" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/> <text x="90" y="66" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Client</text> <rect x="170" y="40" width="120" height="44" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/> <text x="230" y="66" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">API</text> <rect x="310" y="40" width="120" height="44" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/> <text x="370" y="66" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">DB</text> <rect x="30" y="95" width="120" height="44" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/> <text x="90" y="121" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Cache</text> <rect x="170" y="95" width="120" height="44" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/> <text x="230" y="121" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Queue</text> </svg>`, caption: `Gossip Protocols: high-level components and data flow for the system design.` },
   ],
   related: [],
 };
 
-export function createSimulation(stage, panel, stageEl) {
-  const N = 14;
-  const rand = (i, k) => { const s = Math.sin(i * 51.3 + k * 13.7) * 2931.7; return s - Math.floor(s); };
-  return mountSimulation(stage, panel, stageEl, {
-    note: "An update starts at one node and gossips to random peers.",
-    frame(ctx, t) {
-      const d = ctx.d;
-      const cx = 500, cy = 280, R = 200;
-      const period = 6, tt = (t % period);
-      const round = Math.floor(tt / 1.0);
-      const informedCount = Math.min(N, Math.max(1, Math.round(Math.pow(2, round))));
-      const pos = (i) => ({ x: cx + Math.cos((i / N) * Math.PI * 2 - Math.PI / 2) * R, y: cy + Math.sin((i / N) * Math.PI * 2 - Math.PI / 2) * R });
-      const informed = new Set();
-      for (let i = 0; i < informedCount; i++) informed.add(i);
-      // gossip edges this round (informed -> some peers)
-      informed.forEach((i) => {
-        const peer = Math.floor(rand(i, round) * N);
-        if (!informed.has(peer) || Math.random() < 0.2) {
-          const a = pos(i), b = pos(peer);
-          d.curve(a.x, a.y, b.x, b.y, { color: informed.has(peer) ? C.faint : C.ok, dashed: true, alpha: 0.5, bend: 0.15 });
-        }
-      });
-      for (let i = 0; i < N; i++) {
-        const p = pos(i);
-        const inf = informed.has(i);
-        d.token(p.x, p.y, { r: inf ? 14 : 10, color: inf ? C.ok : C.faint, glow: inf });
-        if (i === 0) d.text(p.x, p.y - 26, "origin", { size: 10, align: "center", color: C.ok });
-      }
-      d.badge(500, 520, `round ${round}: ${informedCount}/${N} nodes informed`, { color: informedCount >= N ? C.ok : C.accent, align: "center" });
-      ctx.setStatus(informedCount >= N ? "whole cluster converged (O(log N) rounds)" : "epidemic spread — informed count doubling", "ok");
-    },
-  });
-}

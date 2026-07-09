@@ -1,6 +1,7 @@
 // @article-v2
+// @sim-lab
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
+import { createTopicSim } from "../../../sim/lab/registry.js";
 import { stateMachineTemplate } from "../../../sim/templates/index.js";
 
 const topic = makeTopic({
@@ -37,67 +38,16 @@ const topic = makeTopic({
 <p>Interview tip: whiteboard the charge flow, mark where <b>Consensus (Raft / Paxos)</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
   ],
   figures: [
-    { id: "request-path", svg: `<svg viewBox="0 0 640 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Consensus (Raft / Paxos) in request path">
-<defs><marker id="fig-consensus-raft-paxos-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="10" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="46" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Client</text>
-<rect x="100" y="40" width="88" height="36" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="144" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Consensus (Ra…</text><text x="144" y="72" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">this topic</text>
-<rect x="206" y="40" width="80" height="36" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
-<text x="246" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Order</text>
-<rect x="304" y="40" width="84" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="346" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Gateway</text>
-<rect x="406" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="442" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger</text>
-<rect x="496" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="532" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Queue</text>
-<line x1="82" y1="58" x2="98" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-consensus-raft-paxos-arr)"/>
-<line x1="188" y1="58" x2="204" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-consensus-raft-paxos-arr)"/>
-<line x1="286" y1="58" x2="302" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-consensus-raft-paxos-arr)"/>
-<line x1="388" y1="58" x2="404" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-consensus-raft-paxos-arr)"/>
-<line x1="478" y1="58" x2="494" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-consensus-raft-paxos-arr)"/>
-<text x="320" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">HTTPS request flow — Consensus (Raft / Paxos)</text>
-</svg>`, caption: `Consensus (Raft / Paxos) on the payment request path — from client charge to Ledger commit.` },
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Consensus (Raft / Paxos) structure">
-<defs><marker id="fig-consensus-raft-paxos-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Consensus (Raft…</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-consensus-raft-paxos-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-consensus-raft-paxos-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-consensus-raft-paxos-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Consensus (Raft / Paxos) — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Consensus (Raft / Paxos) pattern — components and data flow in Order Service.` }
+    { id: "consensus", svg: `<svg viewBox="0 0 500 185" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Consensus (Raft / Paxos) consensus"> <defs><marker id="fig-consensus-raft-paxos-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs> <circle cx="250" cy="100" r="70" fill="none" stroke="#93a1bd" stroke-width="1.5" stroke-dasharray="4 3"/> <rect x="220" y="12" width="60" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/> <text x="250" y="24" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">L</text><text x="250" y="40" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">elected</text> <rect x="286.57395614066075" y="60.36881039375368" width="60" height="36" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/> <text x="316.57395614066075" y="72.36881039375368" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">F1</text><text x="316.57395614066075" y="88.36881039375368" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">follower</text> <rect x="261.1449676604731" y="138.63118960624632" width="60" height="36" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/> <text x="291.1449676604731" y="150.63118960624632" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">F2</text><text x="291.1449676604731" y="166.63118960624632" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">follower</text> <rect x="178.85503233952687" y="138.63118960624632" width="60" height="36" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/> <text x="208.85503233952687" y="150.63118960624632" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">F3</text><text x="208.85503233952687" y="166.63118960624632" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">follower</text> <rect x="153.42604385933925" y="60.36881039375366" width="60" height="36" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/> <text x="183.42604385933925" y="72.36881039375366" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">F4</text><text x="183.42604385933925" y="88.36881039375366" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">follower</text> <line x1="250" y1="30" x2="316.57395614066075" y2="78.36881039375368" stroke="#5b9dff" stroke-width="1.2" stroke-dasharray="4 2" marker-end="url(#fig-consensus-raft-paxos-arr)"/> <line x1="250" y1="30" x2="291.1449676604731" y2="156.63118960624632" stroke="#5b9dff" stroke-width="1.2" stroke-dasharray="4 2" marker-end="url(#fig-consensus-raft-paxos-arr)"/> <line x1="250" y1="30" x2="208.85503233952687" y2="156.63118960624632" stroke="#5b9dff" stroke-width="1.2" stroke-dasharray="4 2" marker-end="url(#fig-consensus-raft-paxos-arr)"/> <line x1="250" y1="30" x2="183.42604385933925" y2="78.36881039375366" stroke="#5b9dff" stroke-width="1.2" stroke-dasharray="4 2" marker-end="url(#fig-consensus-raft-paxos-arr)"/> <text x="250" y="18" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Raft cluster — AppendEntries to quorum</text> </svg>`, caption: `Consensus (Raft / Paxos): one elected leader replicates log entries to a quorum of followers — partition blocks commit until a majority is reachable.` },
   ],
   related: [],
   
   
-  template: "stateMachine",
-  sim: () => ({
-    note: `Explore Consensus (Raft / Paxos) in the payment platform.`,
-    toggles: [{ key: "fix", label: "Valid transitions only", kind: "ok", value: false }],
-    states: (ctx) => [
-      { id: "pending", label: "Pending", x: 200, y: 280, color: C.service },
-      { id: "active", label: "Consensus (Raft / Paxos)", x: 500, y: 280, color: C.accent, good: true },
-      { id: "done", label: "Settled", x: 800, y: 280, color: C.ok, good: true },
-      { id: "bad", label: "Invalid", x: 500, y: 420, color: C.err, bad: true },
-    ],
-    currentState: (ctx, t) => {
-      if (!ctx.toggles.fix && (t % 6) > 4) return "bad";
-      return ["pending", "active", "done"][Math.floor((t * 0.35) % 3)];
-    },
-    transitions: [{ from: "pending", to: "active", label: "apply" }, { from: "active", to: "done", label: "commit" }],
-    status: (ctx) => ({ text: ctx.toggles.fix ? "state machine guards flow" : "illegal states possible", cls: ctx.toggles.fix ? "ok" : "err" }),
-  }),
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
+
 export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
+  return createTopicSim("consensus-raft-paxos", stage, panel, stageEl);
 }

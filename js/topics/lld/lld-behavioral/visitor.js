@@ -1,7 +1,23 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { flowTemplate } from "../../../sim/templates/index.js";
+
+const DD_SVG = `<svg viewBox="0 0 580 180" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Visitor double dispatch">
+  <defs><marker id="fig-visitor-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
+  <rect x="20" y="70" width="120" height="44" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.4"/>
+  <text x="80" y="90" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">caller</text>
+  <text x="80" y="105" text-anchor="middle" fill="#93a1bd" font-size="8" font-family="ui-monospace,monospace">accept(visitor)</text>
+  <rect x="200" y="60" width="160" height="60" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
+  <text x="280" y="82" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">CardTransaction</text>
+  <text x="280" y="100" text-anchor="middle" fill="#93a1bd" font-size="8" font-family="ui-monospace,monospace">accept(v){ v.visitCard(this) }</text>
+  <rect x="420" y="60" width="150" height="60" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
+  <text x="495" y="82" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">TaxReportVisitor</text>
+  <text x="495" y="100" text-anchor="middle" fill="#93a1bd" font-size="8" font-family="ui-monospace,monospace">visitCard(txn){ … }</text>
+  <line x1="140" y1="90" x2="198" y2="90" stroke="#5b9dff" stroke-width="1.4" marker-end="url(#fig-visitor-arr)"/>
+  <text x="168" y="82" fill="#93a1bd" font-size="8" font-family="system-ui">1</text>
+  <line x1="360" y1="90" x2="418" y2="90" stroke="#3ddc97" stroke-width="1.4" marker-end="url(#fig-visitor-arr)"/>
+  <text x="388" y="82" fill="#93a1bd" font-size="8" font-family="system-ui">2</text>
+  <text x="300" y="150" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">double dispatch: element picks the type, visitor picks the operation</text>
+</svg>`;
 
 const topic = makeTopic({
   id: "visitor",
@@ -10,85 +26,84 @@ const topic = makeTopic({
   track: "lld",
   tier: "essential",
   archetype: "pattern",
-  oneliner: `New ops without changing classes.`,
+  oneliner: `Add new operations over a fixed set of element types without editing those types — by moving the operation into a visitor and using double dispatch.`,
   sections: [
-    { title: `Motivation`, body: `<p>New ops without changing classes.</p>
-<p>Without <b>Visitor</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Visitor</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Visitor</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Visitor</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Visitor</b> changes to production:</p>
+    { title: `Intent`, body: `<p><b>Visitor</b> represents an operation to be performed on the elements of an object structure, letting you define a new operation without changing the element classes. It concentrates a family of related behaviour in one visitor object rather than scattering it across the element types.</p>
+<p>Say a ledger holds several transaction types — <code>CardTransaction</code>, <code>WalletTransfer</code>, <code>RefundEntry</code>, <code>FeeEntry</code>. You keep needing new cross-cutting reports over them: tax reporting, settlement export, fraud scoring. Adding each as a method on every transaction class bloats those classes with unrelated concerns. Visitor turns each report into its own object instead.</p>
+<pre>// --- Element: each transaction type accepts visitors ---
+public interface Transaction {
+    void accept(TransactionVisitor visitor);
+}
+
+public final class CardTransaction implements Transaction {
+    private final String merchantId;
+    private final Money amount;
+    private final String cardNetwork;
+
+    @Override
+    public void accept(TransactionVisitor visitor) {
+        visitor.visitCard(this);  // double dispatch step 1
+    }
+    // getters…
+}</pre>` },
+    { title: `Participants and double dispatch`, figureAfter: "visitor-dd", body: `<p>Four roles collaborate through a two-step call:</p>
 <ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
+<li><b>Visitor</b> — an interface with one method per element type: <code>visitCard()</code>, <code>visitWalletTransfer()</code>, etc.</li>
+<li><b>Concrete Visitors</b> — <code>TaxReportVisitor</code>, <code>SettlementExportVisitor</code>.</li>
+<li><b>Element</b> — an interface with <code>accept(visitor)</code>.</li>
+<li><b>Concrete Elements</b> — each implements <code>accept(v)</code> as <code>v.visitCard(this)</code>.</li>
 </ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Visitor</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<pre>// --- Visitor: one method per element type ---
+public interface TransactionVisitor {
+    void visitCard(CardTransaction txn);
+    void visitWalletTransfer(WalletTransfer txn);
+    void visitRefund(RefundEntry txn);
+    void visitFee(FeeEntry txn);
+}
+
+// --- Concrete visitor: accumulates a tax report ---
+public final class TaxReportVisitor implements TransactionVisitor {
+    private final Map&lt;String, Money&gt; taxByMerchant = new HashMap&lt;&gt;();
+
+    @Override
+    public void visitCard(CardTransaction txn) {
+        Money tax = txn.amount().multiply(0.08);
+        taxByMerchant.merge(txn.merchantId(), tax, Money::add);
+    }
+
+    @Override
+    public void visitRefund(RefundEntry txn) {
+        taxByMerchant.merge(txn.merchantId(), txn.amount().negate(), Money::add);
+    }
+
+    // visitWalletTransfer, visitFee similarly…
+
+    public Map&lt;String, Money&gt; report() { return taxByMerchant; }
+}</pre>
+<p>This is <b>double dispatch</b>: the element's dynamic type selects which <code>accept</code> runs, and inside it the call selects which visitor method runs — so the executed behaviour depends on <em>both</em> the element type and the visitor type.</p>` },
+    { title: `Implementation flow`, body: `<p>A traversal applies one visitor across the whole structure:</p>
+<ol>
+<li>Build a visitor: <code>TaxReportVisitor tax = new TaxReportVisitor()</code>.</li>
+<li>Walk the elements (often via <b>Iterator</b> or <b>Composite</b>) calling <code>entry.accept(tax)</code>.</li>
+<li>Each element dispatches to the matching method — <code>tax.visitCard(this)</code>, <code>tax.visitFee(this)</code> — accumulating the report inside the visitor.</li>
+</ol>
+<pre>// --- Traversal: apply visitor to every transaction ---
+public Map&lt;String, Money&gt; generateTaxReport(List&lt;Transaction&gt; ledger) {
+    TaxReportVisitor visitor = new TaxReportVisitor();
+    for (Transaction txn : ledger) {
+        txn.accept(visitor);
+    }
+    return visitor.report();
+}</pre>
+<p>Adding a whole new report is now one new class; the element classes never change.</p>` },
+    { title: `The expression-problem trade-off`, body: `<p>Visitor makes one axis cheap and the other expensive. <b>Adding operations</b> is easy — write a new visitor. <b>Adding element types</b> is painful — every existing visitor must gain a new <code>visit</code> method, or fail to compile. Plain OOP (methods on the classes) is the reverse: easy to add types, costly to add operations across all of them. This is the classic <em>expression problem</em>; choose Visitor when the set of element types is <b>stable</b> but the operations grow.</p>
+<p>Other costs: visitors often need access to element internals, weakening encapsulation, and the <code>accept</code>/<code>visit</code> boilerplate is verbose. Do not use it when your element hierarchy is still churning.</p>` },
   ],
   figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Visitor structure">
-<defs><marker id="fig-visitor-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Visitor</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-visitor-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-visitor-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-visitor-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Visitor — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Visitor pattern — components and data flow in Order Service.` }
+    { id: "visitor-dd", svg: DD_SVG, caption: "accept() dispatches on the element type, then calls the visitor method — double dispatch selects behaviour from both types." },
   ],
-  related: [],
-  
-  
-  template: "flow",
-  sim: () => ({
-    note: `Explore Visitor in the payment platform.`,
-    toggles: [{ key: "fix", label: "Apply Visitor", kind: "ok", value: false }],
-    scenario(ctx) {
-      const fix = ctx.toggles.fix;
-      const actors = [
-        { id: "client", label: "Client", color: C.client },
-        { id: "order", label: "Order Service", color: C.service },
-        { id: "ledger", label: "Ledger", color: C.ledger, kind: "db", value: "balance" },
-        { id: "queue", label: "Event Queue", color: C.queue },
-      ];
-      const steps = fix ? [
-        { from: "client", to: "order", label: "pay", good: true },
-        { from: "order", to: "ledger", label: "Visitor ✓", good: true, set: { ledger: "committed" } },
-        { from: "ledger", to: "queue", label: "event", good: true },
-      ] : [
-        { from: "client", to: "order", label: "pay" },
-        { from: "order", to: "ledger", label: "naive write", bad: true, set: { ledger: "risk" } },
-        { from: "order", to: "queue", label: "dual write?", dashed: true, bad: true },
-      ];
-      return {
-        actors, steps, stepDur: 1.2,
-        status: (r) => !r.done ? { text: "processing…", cls: "" }
-          : fix ? { text: "Visitor applied", cls: "ok" } : { text: "pattern missing", cls: "err" },
-      };
-    },
-  }),
+  related: ["composite", "iterator", "interpreter", "strategy"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

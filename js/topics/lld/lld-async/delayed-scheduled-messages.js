@@ -1,7 +1,5 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { stateMachineTemplate } from "../../../sim/templates/index.js";
 
 const topic = makeTopic({
   id: "delayed-scheduled-messages",
@@ -10,74 +8,67 @@ const topic = makeTopic({
   track: "lld",
   tier: "essential",
   archetype: "pattern",
-  oneliner: `Deliver at future time.`,
+  oneliner: `Enqueue a message now but make it invisible to consumers until a future time — the basis for retries with backoff, timeouts, and reminders.`,
   sections: [
-    { title: `Motivation`, body: `<p>Deliver at future time.</p>
-<p>Without <b>Delayed / Scheduled Messages</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>Messages flow through brokers with partitions for parallelism. Consumer groups rebalance on member join/leave. At-least-once delivery requires idempotent handlers keyed on <code>payment_id</code> or <code>event_id</code>.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Delayed / Scheduled Messages</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Delayed / Scheduled Messages</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Delayed / Scheduled Messages</b> changes to production:</p>
+    { title: `What delayed messaging is`, body: `<p>A <b>delayed</b> (or <b>scheduled</b>) message is one that is produced now but must not be delivered until a specified time or after a fixed delay. It lets you schedule future work without a polling loop or a cron job scanning a table. Typical uses in a payment system: retry a failed Gateway call in 30 seconds, cancel an unpaid order after 15 minutes, send a "payment still pending" reminder in an hour, or fire a reconciliation check after a settlement window.</p>
+<p>The distinguishing feature is a per-message <b>visibility time</b>: the broker holds the message and only makes it available to consumers once the delay elapses.</p>` },
+    { title: `Structure: how brokers implement delay`, body: `<p>Different systems realize the same idea with different mechanisms:</p>
 <ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
+<li><b>Native delay</b> — SQS supports a per-message delay (up to 15 min) and Azure Service Bus supports <code>ScheduledEnqueueTime</code>. The broker keeps the message hidden until due.</li>
+<li><b>Dead-letter + TTL trick</b> (RabbitMQ) — publish to a queue with a message TTL and no consumer; on expiry the message dead-letters into the real queue. A delay is modeled as "expire, then route".</li>
+<li><b>Timer / delay topic</b> (Kafka) — Kafka has no native per-message delay, so you use a dedicated delay topic plus a scheduler, or a tumbling set of per-duration topics, or an external scheduler (a DB "due_at" table, a timer service) that republishes when due.</li>
 </ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Delayed / Scheduled Messages</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<p>Under the hood these are priority queues / timer wheels ordered by due time, so the earliest-due message is dispatched first.</p>` },
+    { title: `The dominant use: retry with backoff`, body: `<p>The most common application is <b>retry scheduling</b>. When a consumer fails, instead of immediately redelivering (which hammers a struggling dependency), you re-enqueue the message with an increasing delay — <b>exponential backoff</b>, ideally with <b>jitter</b> to avoid synchronized retry storms. After a maximum number of attempts the message is routed to a dead-letter queue.</p>
+<p>Scheduled messages also implement <b>timeouts as data</b>: when an order is created, schedule a "cancel if still unpaid" message for T+15m; if payment arrives first, the handler sees the order already paid and no-ops.</p>` },
+    { title: `Semantics and pitfalls`, body: `<p>Delay is a <b>lower bound, not an exact deadline</b> — brokers guarantee "not before" the scheduled time, not "precisely at" it; expect drift under load. Delivery is still at-least-once, so a scheduled timeout handler can fire more than once and must be idempotent and must re-check current state (the order may already be paid).</p>
+<p>Beware caps (SQS's 15-minute limit forces you to chain hops for longer delays), the storage cost of many long-pending messages, and clock/timezone bugs when the "due at" is computed on a different host than the one that evaluates it.</p>
+<pre>// --- Schedule order cancellation 15 minutes after creation ---
+@Service
+public class OrderTimeoutScheduler {
+    private final KafkaTemplate&lt;String, String&gt; kafka;
+
+    @Transactional
+    public Order createOrder(CreateOrderCommand cmd) {
+        Order order = orderRepo.save(Order.create(cmd));
+        CancelUnpaidOrderTask task = new CancelUnpaidOrderTask(
+            order.getId(), Instant.now().plus(15, ChronoUnit.MINUTES));
+        kafka.send("order.cancel.delayed", order.getId().toString(), Json.write(task));
+        return order;
+    }
+}</pre>
+<pre>// --- Kafka delay via dedicated scheduler service ---
+@Service
+public class DelayedMessageScheduler {
+    private final ScheduledTaskRepository tasks;
+    private final KafkaTemplate&lt;String, String&gt; kafka;
+
+    public void schedule(String targetTopic, String key, String payload, Instant dueAt) {
+        tasks.save(new ScheduledTask(targetTopic, key, payload, dueAt));
+    }
+
+    @Scheduled(fixedRate = 1000)
+    @Transactional
+    public void dispatchDue() {
+        tasks.findDue(Instant.now()).forEach(task -&gt; {
+            kafka.send(task.targetTopic(), task.key(), task.payload());
+            tasks.delete(task.id());
+        });
+    }
+}
+
+// --- Handler must re-check state (idempotent) ---
+@KafkaListener(topics = "order.cancel.ready")
+@Transactional
+public void cancelIfStillUnpaid(CancelUnpaidOrderTask task) {
+    Order order = orderRepo.findById(task.orderId()).orElseThrow();
+    if (order.getStatus() == OrderStatus.UNPAID) {
+        order.cancel("payment timeout");
+    }
+}</pre>` },
   ],
-  figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Delayed / Scheduled Messages structure">
-<defs><marker id="fig-delayed-scheduled-messages-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Delayed / Sched…</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-delayed-scheduled-messages-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-delayed-scheduled-messages-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-delayed-scheduled-messages-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Delayed / Scheduled Messages — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Delayed / Scheduled Messages pattern — components and data flow in Order Service.` }
-  ],
-  related: [],
-  
-  
-  template: "stateMachine",
-  sim: () => ({
-    note: `Explore Delayed / Scheduled Messages in the payment platform.`,
-    toggles: [{ key: "fix", label: "Valid transitions only", kind: "ok", value: false }],
-    states: (ctx) => [
-      { id: "pending", label: "Pending", x: 200, y: 280, color: C.service },
-      { id: "active", label: "Delayed / Scheduled Messages", x: 500, y: 280, color: C.accent, good: true },
-      { id: "done", label: "Settled", x: 800, y: 280, color: C.ok, good: true },
-      { id: "bad", label: "Invalid", x: 500, y: 420, color: C.err, bad: true },
-    ],
-    currentState: (ctx, t) => {
-      if (!ctx.toggles.fix && (t % 6) > 4) return "bad";
-      return ["pending", "active", "done"][Math.floor((t * 0.35) % 3)];
-    },
-    transitions: [{ from: "pending", to: "active", label: "apply" }, { from: "active", to: "done", label: "commit" }],
-    status: (ctx) => ({ text: ctx.toggles.fix ? "state machine guards flow" : "illegal states possible", cls: ctx.toggles.fix ? "ok" : "err" }),
-  }),
+  related: ["work-queue", "dead-letter-pattern", "point-to-point", "api-idempotency", "backpressure-pattern"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

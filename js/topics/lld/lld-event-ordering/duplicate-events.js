@@ -1,82 +1,57 @@
 // @article-v2
-import { sequenceSim } from "../../../sim/sequence.js";
-import { C } from "../../../sim/primitives.js";
+// @sim-lab
+import { createTopicSim } from "../../../sim/lab/registry.js";
 
 export const meta = { id: "duplicate-events", title: "Duplicate Events", category: "ordering" };
 
 export const content = {
-  oneliner: `Brokers deliver twice.`,
-  archetype: "pattern",
+  oneliner: `At-least-once delivery means the same event can arrive more than once — and a non-idempotent consumer double-applies it, charging a card twice.`,
+  archetype: "failure",
   sections: [
-    { title: `Motivation`, body: `<p>Brokers deliver twice.</p>
-<p>Without <b>Duplicate Events</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Duplicate Events</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Duplicate Events</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Duplicate Events</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Duplicate Events</b> changes to production:</p>
+    { title: `Symptom`, body: `<p>An effect happens twice from a single logical cause. A customer is <b>charged twice</b> for one order; an inventory count drops by two when one item sold; a "welcome" email is sent three times; a ledger shows two identical debits seconds apart with the same amount and merchant. Nothing in the business logic asked for a second action — the same event was simply delivered and processed more than once.</p>` },
+    { title: `Root cause`, body: `<p>Duplicates are not a bug you can eliminate; they are an intrinsic property of reliable messaging. Almost every broker and RPC layer offers <b>at-least-once</b> delivery, and duplicates are the price of that guarantee:</p>
 <ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
+<li><b>Producer retries.</b> A producer sends a message, the broker persists it, but the acknowledgment is lost to a network blip. The producer times out and resends — the broker now holds two copies.</li>
+<li><b>Consumer redelivery.</b> A consumer processes a message but crashes (or is slow) before committing its offset / ack. The broker, seeing no ack, redelivers. The side effect ran once, but it runs again on redelivery.</li>
+<li><b>Rebalancing.</b> When a consumer group rebalances, partitions move between consumers and messages after the last committed offset are reprocessed.</li>
 </ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Duplicate Events</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<p>Because "the broker delivered it" and "the consumer finished its side effects and durably recorded that fact" cannot be made a single atomic step across the network, the safe default is to deliver again on any doubt — producing duplicates.</p>` },
+    { title: `Fixes`, body: `<p>You cannot stop duplicates from arriving, so make processing a duplicate <b>harmless</b> — an idempotent consumer:</p>
+<ul>
+<li><b>Deduplicate on a stable id.</b> Give every event a unique id at production time (not at delivery). The consumer records processed ids and skips any it has already seen. The dedup record and the side effect must commit in the <em>same</em> transaction, or a crash between them reintroduces the duplicate.</li>
+<li><b>Use a natural idempotency key.</b> For a payment, key the charge by <code>(order_id, attempt)</code> or a client idempotency key; a repeat with the same key returns the original result instead of charging again.</li>
+<li><b>Make the write conditional / idempotent.</b> <code>INSERT ... ON CONFLICT DO NOTHING</code>, a unique constraint on the business key, or a state transition that is a no-op if already applied.</li>
+<li><b>Prefer commutative, absolute updates</b> (set balance to X) over relative ones (add to balance) where the domain allows it.</li>
+</ul>
+<pre>// Duplicate event inbox — dedup before side effect
+@Entity
+@Table(name = "processed_events",
+       uniqueConstraints = @UniqueConstraint(columnNames = "event_id"))
+public class ProcessedEvent {
+    @Id @GeneratedValue private Long id;
+    @Column(name = "event_id", nullable = false) private String eventId;
+    private Instant processedAt;
+}
+
+@Transactional
+public class ChargeEventConsumer {
+    private final ProcessedEventRepository inbox;
+    private final LedgerService ledger;
+
+    public void onChargeEvent(ChargeEvent evt) {
+        try {
+            inbox.save(new ProcessedEvent(evt.eventId(), Instant.now()));
+        } catch (DataIntegrityViolationException dup) {
+            return; // already charged — harmless duplicate
+        }
+        ledger.credit(evt.walletId(), evt.amount(), evt.paymentId());
+    }
+}</pre>` },
+    { title: `Prevention`, body: `<p>Assume at-least-once everywhere and design consumers to be idempotent by default rather than bolting on dedup after an incident. Attach a unique <code>event_id</code> at the source and thread it through the whole pipeline so any stage can dedup. Store processed keys with a TTL long enough to outlast the broker's maximum redelivery window. Add a metric for duplicate-hit rate on the dedup table — a sudden rise flags a misbehaving producer or a rebalancing storm. The mental model to internalize: <b>exactly-once processing = at-least-once delivery + idempotent consumer</b>; there is no exactly-once delivery to rely on.</p>` },
   ],
-  figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Duplicate Events structure">
-<defs><marker id="fig-duplicate-events-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Duplicate Events</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-duplicate-events-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-duplicate-events-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-duplicate-events-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Duplicate Events — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Duplicate Events pattern — components and data flow in Order Service.` }
-  ],
-  related: [],
+  related: ["deduplication", "idempotency-key", "exactly-once", "out-of-order", "missing-events", "consumer-rebalancing"],
 };
 
 export function createSimulation(stage, panel, stageEl) {
-  return sequenceSim(stage, panel, stageEl, {
-    note: "Broker redelivers the same event.",
-    toggles: [{ key: "fix", label: "Idempotent consumer (dedup by key)", kind: "ok", value: false }],
-    scenario(ctx) {
-      const fix = ctx.toggles.fix;
-      const actors = [
-        { id: "q", label: "Broker", color: C.queue, kind: "db", value: "evt-9" },
-        { id: "c", label: "Consumer", color: C.service },
-        { id: "w", label: "Wallet", color: C.ledger, kind: "db", value: "100" },
-      ];
-      const steps = [
-        { from: "q", to: "c", label: "deliver evt-9", set: { c: fix ? "seen? no" : "process" } },
-        { from: "c", to: "w", label: "charge 40", good: true, set: { w: "60" } },
-        { from: "q", to: "c", label: "redeliver evt-9", set: { c: fix ? "seen? YES" : "process again" } },
-        fix
-          ? { from: "c", to: "c", label: "skip (dup)", self: true, good: true, set: { c: "acked, no-op" } }
-          : { from: "c", to: "w", label: "charge 40 again", bad: true, set: { w: "20", c: "double charge!" } },
-      ];
-      return {
-        actors, steps, stepDur: 1.1,
-        status: (r) => !r.done ? { text: "delivering…", cls: "" }
-          : fix ? { text: "charged once (100→60) despite redelivery", cls: "ok" } : { text: "charged twice (100→20)", cls: "err" },
-      };
-    },
-  });
+  return createTopicSim("duplicate-events", stage, panel, stageEl);
 }

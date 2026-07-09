@@ -1,7 +1,7 @@
 // @article-v2
+// @sim-lab
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { tradeoffTemplate } from "../../../sim/templates/index.js";
+import { createTopicSim } from "../../../sim/lab/registry.js";
 
 const topic = makeTopic({
   id: "cap-theorem-framing",
@@ -39,28 +39,11 @@ const topic = makeTopic({
   related: ["cap-theorem"],
   
   
-  template: "tradeoff",
-  sim: () => ({
-    note: `Explore CAP Theorem (HLD framing) in the payment platform.`,
-    toggleLabel: "Switch approach",
-    labelA: "Without pattern",
-    labelB: "With CAP Theorem (HLD framing)",
-    sideA: () => ({ nodes: [
-      { title: "Monolith path", active: true },
-      { title: "Tight coupling", value: "risk" },
-      { title: "Scale wall", value: "soon" },
-    ]}),
-    sideB: () => ({ nodes: [
-      { title: "Clear boundary", active: true },
-      { title: "CAP Theorem (HLD framing)", value: "applied" },
-      { title: "Independent scale", value: "ok" },
-    ]}),
-    status: (ctx, t, useB) => ({ text: useB ? "CAP Theorem (HLD framing) — better fit" : "naive — hits limits", cls: useB ? "ok" : "warn" }),
-  }),
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
+
 export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
+  return createTopicSim("cap-theorem-framing", stage, panel, stageEl);
 }

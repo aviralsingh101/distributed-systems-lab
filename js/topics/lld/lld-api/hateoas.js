@@ -1,7 +1,5 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { flowTemplate } from "../../../sim/templates/index.js";
 
 const topic = makeTopic({
   id: "hateoas",
@@ -9,86 +7,122 @@ const topic = makeTopic({
   category: "lld-api",
   track: "lld",
   tier: "hidden-gem",
-  archetype: "pattern",
-  oneliner: `Hypermedia links in responses.`,
+  archetype: "concept",
+  oneliner: `Responses embed hypermedia links to the actions available next, so a client discovers what it can do from the server rather than hard-coding URLs and rules.`,
   sections: [
-    { title: `Motivation`, body: `<p>Hypermedia links in responses.</p>
-<p>Without <b>HATEOAS</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>HATEOAS</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>HATEOAS</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>HATEOAS</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>HATEOAS</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>HATEOAS</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+    { title: `What HATEOAS is`, body: `<p><b>HATEOAS</b> — Hypermedia As The Engine Of Application State — is the constraint that puts the "REST" in a truly RESTful API. It is the top level (level 3) of the <b>Richardson Maturity Model</b>. The idea: a response doesn't just return data, it returns <b>links</b> describing the state transitions available from here, exactly as a web page returns anchors and forms a human follows without knowing the site's URL structure in advance.</p>
+<p>The application's state is driven by the hypermedia the server sends — the client navigates by following links the server provides, not by constructing URLs from out-of-band documentation.</p>
+<pre>// HAL-style link model — the server decides what is legal next
+public record Link(String rel, String href, String method) {}
+
+public record PaymentHalResponse(
+    String id,
+    String walletId,
+    long amountMinor,
+    String currency,
+    PaymentStatus status,
+    Map&lt;String, Link&gt; links
+) {}
+
+public enum PaymentStatus { AUTHORIZED, CAPTURED, VOIDED, REFUNDED }</pre>` },
+    { title: `How it works`, body: `<p>Consider a payment resource. A non-HATEOAS API returns <code>{ "id": 123, "status": "authorized" }</code> and the client must <em>know</em> that authorized payments can be captured at <code>POST /payments/123/capture</code>. A HATEOAS response instead includes the valid next actions as links:</p>
+<p><code>{ "id": 123, "status": "authorized", "_links": { "self": {"href": "/payments/123"}, "capture": {"href": "/payments/123/capture", "method": "POST"}, "void": {"href": "/payments/123/void", "method": "POST"} } }</code></p>
+<p>When the payment is already captured, the server simply omits the <code>capture</code> and <code>void</code> links and offers a <code>refund</code> link. The set of links <em>is</em> the state machine: the client enables buttons based on which links are present, and the server — the authority on state — decides what's allowed.</p>
+<pre>@RestController
+@RequestMapping("/v1/payments")
+public class PaymentHalController {
+
+    private final PaymentService paymentService;
+
+    public PaymentHalController(PaymentService paymentService) {
+        this.paymentService = paymentService;
+    }
+
+    @GetMapping("/{id}")
+    public PaymentHalResponse getPayment(@PathVariable String id) {
+        Payment payment = paymentService.findById(id)
+            .orElseThrow(() -&gt; new PaymentNotFoundException(id));
+        return toHalResponse(payment);
+    }
+
+    // Links are the state machine — only legal transitions appear
+    private PaymentHalResponse toHalResponse(Payment payment) {
+        Map&lt;String, Link&gt; links = new LinkedHashMap&lt;&gt;();
+        String base = "/v1/payments/" + payment.getId();
+        links.put("self", new Link("self", base, "GET"));
+
+        switch (payment.getStatus()) {
+            case AUTHORIZED -&gt; {
+                links.put("capture", new Link("capture", base + "/capture", "POST"));
+                links.put("void", new Link("void", base + "/void", "POST"));
+            }
+            case CAPTURED -&gt; {
+                links.put("refund", new Link("refund", base + "/refunds", "POST"));
+            }
+            case VOIDED, REFUNDED -&gt; { /* terminal — no action links */ }
+        }
+
+        return new PaymentHalResponse(
+            payment.getId(),
+            payment.getWalletId(),
+            payment.getAmountMinor(),
+            payment.getCurrency(),
+            payment.getStatus(),
+            links
+        );
+    }
+}</pre>` },
+    { title: `Why it matters (and the theory)`, body: `<p>The promised benefits are <b>discoverability</b> and <b>decoupling</b>. Clients stop hard-coding URL templates and business rules ("can I capture?"); they follow links and check for their presence, so the server can move endpoints or change transition rules without breaking clients. Standard media types like <b>HAL</b>, <b>JSON:API</b>, and <b>Siren</b> formalize how links and actions are represented.</p>
+<p>It also centralizes workflow logic on the server: the rule "you can only refund a captured payment" lives in one place and is communicated by the links, not duplicated in every client.</p>
+<pre>// Spring HATEOAS — EntityModel wraps data + links
+@GetMapping("/{id}")
+public EntityModel&lt;PaymentDto&gt; getPaymentWithSpringHateoas(@PathVariable String id) {
+    Payment payment = paymentService.findById(id)
+        .orElseThrow(() -&gt; new PaymentNotFoundException(id));
+
+    EntityModel&lt;PaymentDto&gt; model = EntityModel.of(toDto(payment));
+    model.add(linkTo(methodOn(PaymentHalController.class)
+        .getPaymentWithSpringHateoas(id)).withSelfRel());
+
+    if (payment.getStatus() == PaymentStatus.AUTHORIZED) {
+        model.add(linkTo(methodOn(PaymentHalController.class)
+            .capturePayment(id)).withRel("capture"));
+        model.add(linkTo(methodOn(PaymentHalController.class)
+            .voidPayment(id)).withRel("void"));
+    }
+    if (payment.getStatus() == PaymentStatus.CAPTURED) {
+        model.add(linkTo(methodOn(RefundResourceController.class)
+            .createRefund(id, null, null)).withRel("refund"));
+    }
+    return model;
+}</pre>` },
+    { title: `Reality: why adoption is thin`, body: `<p>Despite being "true REST", full HATEOAS is uncommon. Most clients are written against fixed, documented API versions and simply ignore the link section, so the decoupling benefit goes unrealized while payloads grow. Generic hypermedia-driven clients are hard to build; developers usually want typed SDKs generated from a schema, not runtime link-following. Tooling and caching around hypermedia are weaker than around plain resource APIs.</p>
+<p>Where it does earn its keep: long-lived APIs with diverse clients, and especially <b>workflow/state-machine resources</b> (payments, orders, approvals) where advertising the currently-legal transitions genuinely simplifies clients. For most internal CRUD APIs, a good OpenAPI contract delivers more value than link-following, and partial HATEOAS (a few navigational links like <code>next</code>/<code>self</code>) is the pragmatic middle ground.</p>
+<pre>// Partial HATEOAS — pagination links without full state machine
+public record PaymentPageResponse(
+    List&lt;PaymentDto&gt; payments,
+    Map&lt;String, Link&gt; links
+) {}
+
+@GetMapping
+public PaymentPageResponse listPayments(
+        @RequestParam(defaultValue = "20") int limit,
+        @RequestParam(required = false) String after) {
+    PaymentPage page = paymentService.findPage(limit, after);
+    Map&lt;String, Link&gt; links = new LinkedHashMap&lt;&gt;();
+    links.put("self", new Link("self",
+        "/v1/payments?limit=" + limit + (after != null ? "&amp;after=" + after : ""),
+        "GET"));
+    if (page.hasNext()) {
+        links.put("next", new Link("next",
+            "/v1/payments?limit=" + limit + "&amp;after=" + page.endCursor(),
+            "GET"));
+    }
+    return new PaymentPageResponse(page.payments(), links);
+}</pre>` },
   ],
-  figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="HATEOAS structure">
-<defs><marker id="fig-hateoas-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HATEOAS</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-hateoas-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-hateoas-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-hateoas-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">HATEOAS — class and integration boundaries</text>
-</svg>`, caption: `Structure of the HATEOAS pattern — components and data flow in Order Service.` }
-  ],
-  related: [],
-  
-  
-  template: "flow",
-  sim: () => ({
-    note: `Explore HATEOAS in the payment platform.`,
-    toggles: [{ key: "fix", label: "Apply HATEOAS", kind: "ok", value: false }],
-    scenario(ctx) {
-      const fix = ctx.toggles.fix;
-      const actors = [
-        { id: "client", label: "Client", color: C.client },
-        { id: "order", label: "Order Service", color: C.service },
-        { id: "ledger", label: "Ledger", color: C.ledger, kind: "db", value: "balance" },
-        { id: "queue", label: "Event Queue", color: C.queue },
-      ];
-      const steps = fix ? [
-        { from: "client", to: "order", label: "pay", good: true },
-        { from: "order", to: "ledger", label: "HATEOAS ✓", good: true, set: { ledger: "committed" } },
-        { from: "ledger", to: "queue", label: "event", good: true },
-      ] : [
-        { from: "client", to: "order", label: "pay" },
-        { from: "order", to: "ledger", label: "naive write", bad: true, set: { ledger: "risk" } },
-        { from: "order", to: "queue", label: "dual write?", dashed: true, bad: true },
-      ];
-      return {
-        actors, steps, stepDur: 1.2,
-        status: (r) => !r.done ? { text: "processing…", cls: "" }
-          : fix ? { text: "HATEOAS applied", cls: "ok" } : { text: "pattern missing", cls: "err" },
-      };
-    },
-  }),
+  related: ["rest-resource-modeling", "api-versioning-strategies", "error-contract-design", "contract-first-vs-code-first", "graphql-schema-design"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

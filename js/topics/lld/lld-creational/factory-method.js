@@ -1,7 +1,27 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { flowTemplate } from "../../../sim/templates/index.js";
+
+const FM_SVG = `<svg viewBox="0 0 520 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Factory Method UML">
+  <defs><marker id="fig-factory-method-arr" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#93a1bd"/></marker></defs>
+  <rect x="20" y="20" width="190" height="70" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
+  <text x="115" y="40" text-anchor="middle" fill="#cdd6e8" font-size="12" font-weight="600" font-family="system-ui">PaymentCreator</text>
+  <line x1="20" y1="50" x2="210" y2="50" stroke="#26324a"/>
+  <text x="30" y="68" fill="#cdd6e8" font-size="10" font-family="ui-monospace,monospace">+ process()</text>
+  <text x="30" y="84" fill="#5b9dff" font-size="10" font-family="ui-monospace,monospace"># createGateway()*</text>
+  <rect x="20" y="130" width="190" height="66" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
+  <text x="115" y="150" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">StripeCreator</text>
+  <line x1="20" y1="160" x2="210" y2="160" stroke="#26324a"/>
+  <text x="30" y="182" fill="#3ddc97" font-size="10" font-family="ui-monospace,monospace"># createGateway()</text>
+  <rect x="310" y="20" width="190" height="60" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
+  <text x="405" y="45" text-anchor="middle" fill="#cdd6e8" font-size="12" font-weight="600" font-family="system-ui">&lt;&lt;Gateway&gt;&gt;</text>
+  <text x="405" y="66" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="ui-monospace,monospace">+ charge()</text>
+  <rect x="310" y="136" width="190" height="54" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
+  <text x="405" y="167" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">StripeGateway</text>
+  <line x1="115" y1="130" x2="115" y2="92" stroke="#93a1bd" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#fig-factory-method-arr)"/>
+  <line x1="405" y1="136" x2="405" y2="82" stroke="#93a1bd" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#fig-factory-method-arr)"/>
+  <line x1="210" y1="163" x2="308" y2="163" stroke="#5b9dff" stroke-width="1.4" marker-end="url(#fig-factory-method-arr)"/>
+  <text x="260" y="155" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">creates</text>
+</svg>`;
 
 const topic = makeTopic({
   id: "factory-method",
@@ -10,85 +30,76 @@ const topic = makeTopic({
   track: "lld",
   tier: "essential",
   archetype: "pattern",
-  oneliner: `Subclass decides which type to create.`,
+  oneliner: `Define a method for creating an object but let subclasses decide which concrete class to instantiate, so the creating code depends only on the product interface.`,
   sections: [
-    { title: `Motivation`, body: `<p>Subclass decides which type to create.</p>
-<p>Without <b>Factory Method</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Factory Method</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Factory Method</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Factory Method</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Factory Method</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Factory Method</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+    { title: `The problem it solves`, body: `<p><b>Factory Method</b> is a GoF creational pattern. It addresses a common friction: a class needs to create objects, but it should not be hard-wired to their concrete types. If <code>OrderProcessor</code> does <code>new StripeGateway()</code> directly, it is coupled to Stripe — adding Adyen means editing the processor, violating the Open/Closed Principle.</p>
+<p>The pattern moves object creation into an overridable method. The high-level workflow is written once against a product interface; <em>which</em> concrete product it uses is decided by a subclass that overrides the factory method.</p>` },
+    { title: `Structure`, figureAfter: "fm-uml", body: `<p>There are four roles. The <b>Product</b> is an interface (<code>PaymentGateway</code> with <code>charge()</code>). The <b>Concrete Product</b> implements it (<code>StripeGateway</code>). The <b>Creator</b> is an abstract class that declares the factory method <code>createGateway()</code> and contains the business logic that uses its result. The <b>Concrete Creator</b> (<code>StripeCreator</code>) overrides the factory method to return a specific product.</p>
+<pre>// Product interface
+public interface PaymentGateway {
+    ChargeResult charge(ChargeRequest request);
+}
+
+// Concrete products
+public final class StripeGateway implements PaymentGateway {
+    private final StripeClient client;
+    public StripeGateway(StripeClient client) { this.client = client; }
+    @Override public ChargeResult charge(ChargeRequest req) { /* Stripe SDK */ }
+}
+
+public final class AdyenGateway implements PaymentGateway {
+    private final Client adyen;
+    public AdyenGateway(Client adyen) { this.adyen = adyen; }
+    @Override public ChargeResult charge(ChargeRequest req) { /* Adyen SDK */ }
+}</pre>
+<p>The Creator declares the factory method and uses it in its template workflow:</p>
+<pre>// Creator — business logic written once against PaymentGateway
+public abstract class PaymentCreator {
+    // Factory method — subclass decides which gateway
+    protected abstract PaymentGateway createGateway();
+
+    // Template operation — never names a concrete gateway
+    public final Order processOrder(PlaceOrderCommand cmd) {
+        PaymentGateway gateway = createGateway();
+        Order order = Order.create(cmd);
+        ChargeResult result = gateway.charge(order.toChargeRequest());
+        order.applyChargeResult(result);
+        return order;
+    }
+}
+
+// Concrete creators — one per provider
+public class StripePaymentCreator extends PaymentCreator {
+    private final StripeClient stripe;
+    public StripePaymentCreator(StripeClient stripe) { this.stripe = stripe; }
+    @Override protected PaymentGateway createGateway() {
+        return new StripeGateway(stripe);
+    }
+}
+
+public class AdyenPaymentCreator extends PaymentCreator {
+    private final Client adyen;
+    public AdyenPaymentCreator(Client adyen) { this.adyen = adyen; }
+    @Override protected PaymentGateway createGateway() {
+        return new AdyenGateway(adyen);
+    }
+}</pre>` },
+    { title: `Flow`, body: `<p>The steps at runtime: (1) client code holds a Creator, chosen at configuration time. (2) It calls the template operation <code>processOrder()</code> on the Creator. (3) Inside, the Creator calls its own <code>createGateway()</code>; because of dynamic dispatch the Concrete Creator's override runs and returns the right product. (4) The Creator uses the returned gateway through the interface. Adding a new provider means implementing a new Product and a new Concrete Creator — no existing code changes.</p>
+<pre>// Client — picks creator at config time, never names Stripe or Adyen
+public class PaymentApplication {
+    public static void main(String[] args) {
+        PaymentCreator creator = buildCreatorFromConfig(args);
+        Order order = creator.processOrder(new PlaceOrderCommand(/* ... */));
+    }
+}</pre>` },
+    { title: `Trade-offs and related patterns`, body: `<p><b>Benefits:</b> the creator is decoupled from concrete products; new products slot in without editing existing code; creation logic is centralized and testable with fake products. <b>Costs:</b> it introduces a parallel hierarchy of creators, which is heavy if you only have one product type — a plain parameterized "simple factory" or Dependency Injection is often enough.</p>
+<p>Contrast with <b>Abstract Factory</b>, which produces <em>families</em> of related products, and with <b>Builder</b>, which assembles one complex product step by step. Factory Method varies a single product via subclassing.</p>` },
   ],
   figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Factory Method structure">
-<defs><marker id="fig-factory-method-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Factory Method</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-factory-method-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-factory-method-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-factory-method-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Factory Method — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Factory Method pattern — components and data flow in Order Service.` }
+    { id: "fm-uml", svg: FM_SVG, caption: `The Creator declares an abstract factory method; a Concrete Creator overrides it to return a Concrete Product, while the Creator's logic uses only the Product interface.` },
   ],
-  related: [],
-  
-  
-  template: "flow",
-  sim: () => ({
-    note: `Explore Factory Method in the payment platform.`,
-    toggles: [{ key: "fix", label: "Apply Factory Method", kind: "ok", value: false }],
-    scenario(ctx) {
-      const fix = ctx.toggles.fix;
-      const actors = [
-        { id: "client", label: "Client", color: C.client },
-        { id: "order", label: "Order Service", color: C.service },
-        { id: "ledger", label: "Ledger", color: C.ledger, kind: "db", value: "balance" },
-        { id: "queue", label: "Event Queue", color: C.queue },
-      ];
-      const steps = fix ? [
-        { from: "client", to: "order", label: "pay", good: true },
-        { from: "order", to: "ledger", label: "Factory Method ✓", good: true, set: { ledger: "committed" } },
-        { from: "ledger", to: "queue", label: "event", good: true },
-      ] : [
-        { from: "client", to: "order", label: "pay" },
-        { from: "order", to: "ledger", label: "naive write", bad: true, set: { ledger: "risk" } },
-        { from: "order", to: "queue", label: "dual write?", dashed: true, bad: true },
-      ];
-      return {
-        actors, steps, stepDur: 1.2,
-        status: (r) => !r.done ? { text: "processing…", cls: "" }
-          : fix ? { text: "Factory Method applied", cls: "ok" } : { text: "pattern missing", cls: "err" },
-      };
-    },
-  }),
+  related: ["abstract-factory", "builder", "prototype", "dependency-injection", "open-closed-principle"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

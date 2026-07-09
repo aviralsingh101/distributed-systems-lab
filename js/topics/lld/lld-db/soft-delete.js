@@ -1,7 +1,5 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { dataModelTemplate } from "../../../sim/templates/index.js";
 
 const topic = makeTopic({
   id: "soft-delete",
@@ -10,71 +8,146 @@ const topic = makeTopic({
   track: "lld",
   tier: "essential",
   archetype: "pattern",
-  oneliner: `Flag deleted; keep history.`,
+  oneliner: `Mark a row as deleted with a timestamp instead of removing it, so history, undo, and referential integrity survive the "delete".`,
   sections: [
-    { title: `Motivation`, body: `<p>Flag deleted; keep history.</p>
-<p>Without <b>Soft Delete</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Soft Delete</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Soft Delete</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Soft Delete</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Soft Delete</b> changes to production:</p>
+    { title: `The idea`, body: `<p><b>Soft delete</b> replaces a physical <code>DELETE</code> with an <code>UPDATE</code> that flags the row as gone. The canonical implementation is a nullable <code>deleted_at TIMESTAMPTZ</code>: <code>NULL</code> means live, a non-null timestamp means deleted (and records <em>when</em>). Every normal query then adds <code>WHERE deleted_at IS NULL</code>.</p>
+<p>You reach for it when a hard delete would destroy something you still need: audit and compliance history, the ability to undo a mistaken deletion, or referential integrity for rows that other records still point at. In a payment system you essentially never hard-delete a Wallet or Ledger entry — you close or void it, keeping the row for reconciliation and regulators.</p>
+<pre>@Entity
+@Table(name = "wallets")
+@SQLDelete(sql = "UPDATE wallets SET deleted_at = NOW() WHERE id = ?")
+@Where(clause = "deleted_at IS NULL")
+public class Wallet {
+
+    @Id
+    private String id;
+
+    @Column(name = "balance_minor", nullable = false)
+    private long balanceMinor;
+
+    @Column(name = "currency", nullable = false, length = 3)
+    private String currency;
+
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
+
+    @Column(name = "deleted_by")
+    private String deletedBy;
+}</pre>` },
+    { title: `Structure`, body: `<p>Add the marker column and a partial index so the hot "live rows" path stays fast:</p>
+<p><code>ALTER TABLE customer ADD COLUMN deleted_at TIMESTAMPTZ;</code></p>
+<p><code>CREATE INDEX idx_customer_live ON customer (id) WHERE deleted_at IS NULL;</code></p>
+<p>Prefer a nullable timestamp over a boolean <code>is_deleted</code>: it answers "is it deleted?" <em>and</em> "when?", and it plays nicely with partial indexes. Optionally add <code>deleted_by</code> for accountability.</p>
+<pre>@Entity
+@Table(name = "payments",
+       indexes = @Index(name = "idx_payment_live",
+                        columnList = "wallet_id, created_at"))
+@SQLDelete(sql = "UPDATE payments SET deleted_at = NOW(), deleted_by = ?2 WHERE id = ?1")
+@Where(clause = "deleted_at IS NULL")
+public class Payment {
+
+    @Id
+    private String id;
+
+    @Column(name = "wallet_id", nullable = false)
+    private String walletId;
+
+    @Column(name = "amount_minor", nullable = false)
+    private long amountMinor;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false)
+    private PaymentStatus status;
+
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
+
+    @Column(name = "deleted_by")
+    private String deletedBy;
+}</pre>` },
+    { title: `The uniqueness trap`, body: `<p>The most common soft-delete bug is uniqueness. A plain <code>UNIQUE(email)</code> constraint counts deleted rows too, so a user who deletes their account can never re-register with the same email. The fix is a <b>partial unique index</b> that only constrains live rows:</p>
+<p><code>CREATE UNIQUE INDEX uniq_customer_email_live ON customer (email) WHERE deleted_at IS NULL;</code></p>
+<p>Now the email is unique among active customers, but any number of soft-deleted rows may share it.</p>
+<pre>@Entity
+@Table(name = "wallets",
+       uniqueConstraints = @UniqueConstraint(
+           name = "uq_wallet_owner_email_live",
+           columnNames = "owner_email"))
+// Note: partial unique index must be created via DDL migration:
+// CREATE UNIQUE INDEX uq_wallet_owner_email_live
+//   ON wallets (owner_email) WHERE deleted_at IS NULL;
+
+@SQLDelete(sql = "UPDATE wallets SET deleted_at = NOW() WHERE id = ?")
+@Where(clause = "deleted_at IS NULL")
+public class Wallet {
+
+    @Id
+    private String id;
+
+    @Column(name = "owner_email")
+    private String ownerEmail;
+
+    @Column(name = "balance_minor", nullable = false)
+    private long balanceMinor;
+
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
+}</pre>` },
+    { title: `The query-discipline problem`, body: `<p>Soft delete's real cost is that <b>every query must remember the filter</b>. One forgotten <code>WHERE deleted_at IS NULL</code> leaks deleted data into a screen, a report, or an aggregate. Because it is a whole-codebase invariant, enforce it in one place rather than by hand:</p>
 <ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
+<li>A <b>database view</b> (<code>customer_active</code>) that applications read instead of the base table.</li>
+<li>An <b>ORM global scope / default filter</b> (Hibernate <code>@Where</code>, Rails <code>default_scope</code>) applied automatically, with an explicit opt-out for admin tools.</li>
+<li>A repository layer that is the only code allowed to touch the base table.</li>
 </ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Soft Delete</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<pre>@Service
+public class WalletService {
+
+    private final WalletRepository walletRepository;
+    private final EntityManager entityManager;
+
+    // Normal path: @Where auto-filters deleted rows
+    public Optional&lt;Wallet&gt; findActive(String walletId) {
+        return walletRepository.findById(walletId);
+    }
+
+    // Admin path: explicitly include deleted wallets
+    public Optional&lt;Wallet&gt; findIncludingDeleted(String walletId) {
+        return entityManager
+            .createQuery("SELECT w FROM Wallet w WHERE w.id = :id", Wallet.class)
+            .setParameter("id", walletId)
+            .setHint("org.hibernate.filter.enabled", false)
+            .getResultStream()
+            .findFirst();
+    }
+
+    public void softDelete(String walletId, String deletedBy) {
+        Wallet wallet = walletRepository.findById(walletId).orElseThrow();
+        walletRepository.delete(wallet);  // triggers @SQLDelete UPDATE
+    }
+}</pre>` },
+    { title: `Trade-offs and alternatives`, body: `<p>Soft-deleted rows accumulate forever, bloating tables and indexes and slowing scans; schedule a <b>purge job</b> that hard-deletes rows past their retention window. Cascading is manual — the database will not cascade a soft delete, so deleting a parent must also flag its children (or you accept "orphaned but live" children). Unique constraints, foreign keys, and third-party reporting tools all need to be soft-delete-aware.</p>
+<p>When the driver is pure history rather than undo, consider alternatives: an <b>audit table</b> that records deletions separately, or <b>temporal / valid-time tables</b> that version rows. Use soft delete when you need the row to keep existing and be restorable in place; use those patterns when you need a full change log.</p>
+<pre>@Scheduled(cron = "0 3 * * *")  // nightly purge of expired soft-deletes
+@Service
+public class WalletPurgeJob {
+
+    private static final Duration RETENTION = Duration.ofDays(90);
+    private final EntityManager entityManager;
+
+    @Transactional
+    public void purgeExpiredWallets() {
+        Instant cutoff = Instant.now().minus(RETENTION);
+        entityManager.createNativeQuery("""
+            DELETE FROM wallets
+            WHERE deleted_at IS NOT NULL
+              AND deleted_at &lt; :cutoff
+            """)
+            .setParameter("cutoff", cutoff)
+            .executeUpdate();
+    }
+}</pre>` },
   ],
-  figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Soft Delete structure">
-<defs><marker id="fig-soft-delete-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Soft Delete</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-soft-delete-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-soft-delete-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-soft-delete-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Soft Delete — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Soft Delete pattern — components and data flow in Order Service.` }
-  ],
-  related: [],
-  
-  
-  template: "dataModel",
-  sim: () => ({
-    note: `Explore Soft Delete in the payment platform. — schema view`,
-    toggles: [{ key: "fix", label: "Normalized design", kind: "ok", value: false }],
-    tables: (ctx) => ctx.toggles.fix ? [
-      { name: "payments", cols: [{ name: "id", pk: true }, { name: "wallet_id", fk: true }, { name: "amount" }] },
-      { name: "wallets", cols: [{ name: "id", pk: true }, { name: "balance" }] },
-      { name: "outbox", cols: [{ name: "id", pk: true }, { name: "event", fk: true }] },
-    ] : [
-      { name: "everything", cols: [{ name: "blob", pk: true }, { name: "misc" }] },
-    ],
-    relations: [{ from: "payments", to: "wallets" }],
-    status: (ctx) => ({ text: ctx.toggles.fix ? "schema supports Soft Delete" : "schema fights the pattern", cls: ctx.toggles.fix ? "ok" : "warn" }),
-  }),
+  related: ["audit-tables", "temporal-tables", "primary-foreign-keys", "indexing-strategies"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

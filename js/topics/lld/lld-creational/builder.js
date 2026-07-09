@@ -1,7 +1,23 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { flowTemplate } from "../../../sim/templates/index.js";
+
+const BUILDER_SVG = `<svg viewBox="0 0 520 190" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Builder pattern fluent assembly">
+  <defs><marker id="fig-builder-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
+  <rect x="20" y="70" width="150" height="52" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
+  <text x="95" y="92" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">ChargeBuilder</text>
+  <text x="95" y="110" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="ui-monospace,monospace">amount() .currency()</text>
+  <rect x="210" y="30" width="130" height="34" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.2"/>
+  <text x="275" y="52" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="ui-monospace,monospace">.idempotencyKey()</text>
+  <rect x="210" y="80" width="130" height="34" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.2"/>
+  <text x="275" y="102" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="ui-monospace,monospace">.metadata()</text>
+  <rect x="210" y="130" width="130" height="34" rx="6" fill="#1a2236" stroke="#93a1bd" stroke-width="1.2"/>
+  <text x="275" y="152" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="ui-monospace,monospace">optional steps</text>
+  <rect x="380" y="72" width="120" height="48" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="2"/>
+  <text x="440" y="93" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Charge</text>
+  <text x="440" y="110" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="ui-monospace,monospace">build() → immutable</text>
+  <line x1="170" y1="96" x2="378" y2="96" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-builder-arr)"/>
+  <text x="300" y="180" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">chained calls set parts; build() validates and returns the product</text>
+</svg>`;
 
 const topic = makeTopic({
   id: "builder",
@@ -10,85 +26,82 @@ const topic = makeTopic({
   track: "lld",
   tier: "essential",
   archetype: "pattern",
-  oneliner: `Step-by-step complex object assembly.`,
+  oneliner: `Separate the construction of a complex object from its representation, assembling it step by step and producing a validated, often immutable, result.`,
   sections: [
-    { title: `Motivation`, body: `<p>Step-by-step complex object assembly.</p>
-<p>Without <b>Builder</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Builder</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Builder</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Builder</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Builder</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Builder</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+    { title: `The problem it solves`, body: `<p><b>Builder</b> is a GoF creational pattern for objects with many parameters — several required, several optional. The alternatives are ugly: a <b>telescoping constructor</b> with null placeholders is unreadable and error-prone when arguments share a type, while a no-arg object with setters can be left in a half-built, invalid state.</p>
+<p>Builder collects the parts through named steps and constructs the final object in one atomic <code>build()</code>, which validates invariants and can return an immutable instance.</p>` },
+    { title: `Structure`, figureAfter: "builder-uml", body: `<p>The roles: the <b>Product</b> is the complex object being created (<code>ChargeRequest</code>), ideally immutable. The <b>Builder</b> holds mutable working state and exposes one step method per part, each returning <code>this</code> for fluent chaining. A terminal <code>build()</code> validates and returns the Product.</p>
+<pre>// Immutable product — no setters, only built via builder
+public final class ChargeRequest {
+    private final String paymentId;
+    private final String walletId;
+    private final int amountCents;
+    private final String currency;
+    private final Map&lt;String, String&gt; metadata;
+
+    private ChargeRequest(Builder builder) {
+        this.paymentId = builder.paymentId;
+        this.walletId = builder.walletId;
+        this.amountCents = builder.amountCents;
+        this.currency = builder.currency;
+        this.metadata = Map.copyOf(builder.metadata);
+    }
+
+    public String paymentId() { return paymentId; }
+    public String walletId() { return walletId; }
+    public int amountCents() { return amountCents; }
+    public String currency() { return currency; }
+    public Map&lt;String, String&gt; metadata() { return metadata; }
+
+    public static Builder builder() { return new Builder(); }
+}</pre>
+<p>The builder accumulates parts and validates at build time:</p>
+<pre>public static class Builder {
+    private String paymentId;
+    private String walletId;
+    private int amountCents;
+    private String currency;
+    private final Map&lt;String, String&gt; metadata = new HashMap&lt;&gt;();
+
+    public Builder paymentId(String id) { this.paymentId = id; return this; }
+    public Builder walletId(String id)  { this.walletId = id; return this; }
+    public Builder amountCents(int c)   { this.amountCents = c; return this; }
+    public Builder currency(String c)   { this.currency = c; return this; }
+    public Builder metadata(String k, String v) { metadata.put(k, v); return this; }
+
+    public ChargeRequest build() {
+        if (paymentId == null || paymentId.isBlank())
+            throw new IllegalStateException("paymentId is required");
+        if (walletId == null)
+            throw new IllegalStateException("walletId is required");
+        if (amountCents &lt;= 0)
+            throw new IllegalStateException("amount must be positive");
+        if (currency == null)
+            throw new IllegalStateException("currency is required");
+        return new ChargeRequest(this);
+    }
+}</pre>` },
+    { title: `Flow`, body: `<p>The construction flow: (1) create a builder. (2) call the step methods for the parts you need, in any order, skipping optional ones. (3) call <code>build()</code>, which runs validation and returns the Product. Because the object only exists after <code>build()</code> succeeds, callers can never observe a partially initialized charge.</p>
+<pre>// Fluent call site — readable, self-documenting
+ChargeRequest charge = ChargeRequest.builder()
+    .paymentId("pay_abc123")
+    .walletId("wal_user42")
+    .amountCents(1999)
+    .currency("USD")
+    .metadata("order_id", "ord_789")
+    .build();
+
+// Gateway receives a fully validated, immutable request
+ChargeResult result = gateway.charge(charge);</pre>
+<p>Optional fields are simply omitted — no null placeholders, no ambiguity about which int is which.</p>` },
+    { title: `Trade-offs and related patterns`, body: `<p><b>Benefits:</b> readable call sites with named parts, no invalid intermediate states, centralized validation, and support for immutable products. It shines when a type has many optional fields or multiple valid configurations. <b>Costs:</b> a builder is extra boilerplate that is unjustified for objects with two or three fields, where a plain constructor is simpler (KISS).</p>
+<p>Builder assembles <em>one</em> complex product step by step; <b>Factory Method</b> and <b>Abstract Factory</b> instead choose <em>which</em> product/family to instantiate in a single call.</p>` },
   ],
   figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Builder structure">
-<defs><marker id="fig-builder-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Builder</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-builder-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-builder-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-builder-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Builder — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Builder pattern — components and data flow in Order Service.` }
+    { id: "builder-uml", svg: BUILDER_SVG, caption: `Fluent step methods accumulate parts on the builder; build() validates and returns an immutable Charge.` },
   ],
-  related: [],
-  
-  
-  template: "flow",
-  sim: () => ({
-    note: `Explore Builder in the payment platform.`,
-    toggles: [{ key: "fix", label: "Apply Builder", kind: "ok", value: false }],
-    scenario(ctx) {
-      const fix = ctx.toggles.fix;
-      const actors = [
-        { id: "client", label: "Client", color: C.client },
-        { id: "order", label: "Order Service", color: C.service },
-        { id: "ledger", label: "Ledger", color: C.ledger, kind: "db", value: "balance" },
-        { id: "queue", label: "Event Queue", color: C.queue },
-      ];
-      const steps = fix ? [
-        { from: "client", to: "order", label: "pay", good: true },
-        { from: "order", to: "ledger", label: "Builder ✓", good: true, set: { ledger: "committed" } },
-        { from: "ledger", to: "queue", label: "event", good: true },
-      ] : [
-        { from: "client", to: "order", label: "pay" },
-        { from: "order", to: "ledger", label: "naive write", bad: true, set: { ledger: "risk" } },
-        { from: "order", to: "queue", label: "dual write?", dashed: true, bad: true },
-      ];
-      return {
-        actors, steps, stepDur: 1.2,
-        status: (r) => !r.done ? { text: "processing…", cls: "" }
-          : fix ? { text: "Builder applied", cls: "ok" } : { text: "pattern missing", cls: "err" },
-      };
-    },
-  }),
+  related: ["factory-method", "abstract-factory", "prototype", "kiss-yagni-principles"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

@@ -1,7 +1,22 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { layerTemplate } from "../../../sim/templates/index.js";
+
+const HEX_SVG = `<svg viewBox="0 0 720 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Hexagonal ports and adapters">
+  <defs><marker id="fig-hexagonal-ports-adapters-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
+  <polygon points="360,55 430,95 430,155 360,195 290,155 290,95" fill="#1a2236" stroke="#3ddc97" stroke-width="1.8"/>
+  <text x="360" y="120" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Domain</text>
+  <text x="360" y="138" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">core + ports</text>
+  <rect x="40" y="60" width="140" height="34" rx="5" fill="#1a2236" stroke="#5b9dff" stroke-width="1.4"/><text x="110" y="81" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">REST controller</text>
+  <rect x="40" y="150" width="140" height="34" rx="5" fill="#1a2236" stroke="#5b9dff" stroke-width="1.4"/><text x="110" y="171" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">queue consumer</text>
+  <text x="110" y="115" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">driving adapters</text>
+  <rect x="540" y="60" width="150" height="34" rx="5" fill="#1a2236" stroke="#7c5cff" stroke-width="1.4"/><text x="615" y="81" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">Postgres repo</text>
+  <rect x="540" y="150" width="150" height="34" rx="5" fill="#1a2236" stroke="#7c5cff" stroke-width="1.4"/><text x="615" y="171" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">gateway client</text>
+  <text x="615" y="115" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">driven adapters</text>
+  <line x1="180" y1="77" x2="288" y2="105" stroke="#5b9dff" stroke-width="1.4" marker-end="url(#fig-hexagonal-ports-adapters-arr)"/>
+  <line x1="180" y1="167" x2="288" y2="150" stroke="#5b9dff" stroke-width="1.4" marker-end="url(#fig-hexagonal-ports-adapters-arr)"/>
+  <line x1="432" y1="105" x2="538" y2="77" stroke="#3ddc97" stroke-width="1.4" marker-end="url(#fig-hexagonal-ports-adapters-arr)"/>
+  <line x1="432" y1="150" x2="538" y2="167" stroke="#3ddc97" stroke-width="1.4" marker-end="url(#fig-hexagonal-ports-adapters-arr)"/>
+</svg>`;
 
 const topic = makeTopic({
   id: "hexagonal-ports-adapters",
@@ -10,68 +25,93 @@ const topic = makeTopic({
   track: "lld",
   tier: "essential",
   archetype: "pattern",
-  oneliner: `Domain core with plug-in edges.`,
+  oneliner: `Put the domain at the center behind ports (interfaces); connect the outside world through adapters that plug into those ports.`,
   sections: [
-    { title: `Motivation`, body: `<p>Domain core with plug-in edges.</p>
-<p>Without <b>Hexagonal Ports & Adapters</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Hexagonal Ports & Adapters</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Hexagonal Ports & Adapters</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Hexagonal Ports & Adapters</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Hexagonal Ports & Adapters</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Hexagonal Ports & Adapters</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+    { title: `The idea`, body: `<p><b>Hexagonal architecture</b> (Alistair Cockburn's "ports and adapters") inverts the usual layer stack. Instead of the domain sitting on top of the database, the <b>domain core sits in the middle</b> and everything external — HTTP, database, message broker, third-party APIs — attaches at the edges. The core knows nothing about those technologies; it only knows about abstract <b>ports</b>. The goal is symmetry: the application should be equally drivable by a real HTTP request, a test harness, or a CLI, and equally backed by Postgres, an in-memory fake, or a mock.</p>` },
+    { title: `Ports and adapters`, figureAfter: "hex", body: `<p>A <b>port</b> is an interface owned by the domain, expressed in domain terms. An <b>adapter</b> is a concrete implementation that bridges a port to a specific technology. They come in two directions:</p>
+<pre>// INBOUND port — application service API
+public interface PlaceOrderUseCase {
+    OrderId place(PlaceOrderCommand command);
+}
+
+// DRIVING adapter — REST translates HTTP to domain command
+@RestController
+public class OrderController {
+    private final PlaceOrderUseCase placeOrder;
+
+    @PostMapping("/orders")
+    public OrderResponse create(@RequestBody PlaceOrderRequest req) {
+        OrderId id = placeOrder.place(req.toCommand());
+        return OrderResponse.from(id);
+    }
+}
+
+// OUTBOUND port — domain defines what it needs
+public interface PaymentGateway {
+    ChargeResult charge(ChargeRequest request);
+}
+
+// DRIVEN adapter — HTTP client to Stripe
+public class StripeGatewayAdapter implements PaymentGateway {
+    public ChargeResult charge(ChargeRequest req) { /* ... */ }
+}</pre>
+<p>The dependency arrows all point <b>inward</b>: adapters depend on the core's ports, never the reverse.</p>
+<pre>// Inbound port: domain vocabulary
+public interface CapturePaymentUseCase {
+    ChargeResult capture(ChargeRequest request);
+}
+
+// Outbound port: domain vocabulary
+public interface PaymentGatewayPort {
+    ChargeResult charge(ChargeRequest request);
+}
+
+// Driving adapter: REST controller translates HTTP → domain
+@RestController
+class PaymentController implements CapturePaymentUseCase {
+    private final CapturePaymentService service;
+
+    @PostMapping("/payments")
+    public ChargeResult capture(@RequestBody ChargeRequest request) {
+        return service.capture(request);
+    }
+}
+
+// Driven adapter: Stripe client implements outbound port
+class StripeGatewayAdapter implements PaymentGatewayPort {
+    private final StripeClient stripe;
+    @Override
+    public ChargeResult charge(ChargeRequest req) { /* map to Stripe SDK */ }
+}</pre>` },
+    { title: `Why it pays off`, body: `<p>The structure buys three things. <b>Testability:</b> because outbound ports are interfaces, you unit-test the domain with in-memory fakes and no database or network — fast, deterministic tests of real business logic. <b>Replaceability:</b> swapping the persistence adapter (Postgres → DynamoDB) or adding a new entry point (add a Kafka consumer beside the REST API) touches only an adapter, not the core. <b>Clarity of contracts:</b> every external dependency is named and typed as a port, so the surface area of the domain's outside world is explicit rather than smeared through the code.</p>` },
+    { title: `Implementation and pitfalls`, body: `<p>In practice: one module for the domain (entities, value objects, application services, and the port interfaces), and separate adapter modules that depend on it, wired together by dependency injection at startup. The classic mistake is <b>leaking technology into the port</b> — a repository port that returns an ORM entity or a JPA <code>Page</code>, or a port that takes an HTTP request object. Keep port signatures in domain types only. The second pitfall is over-engineering: a small CRUD service with no real domain logic gets little from full hexagonal ceremony — plain layering is enough. Reach for it when the domain is rich and you need to isolate it from churny infrastructure.</p>
+<pre>// LEAKY port: ORM type in domain interface
+public interface LeakyPaymentRepository {
+    Page&lt;PaymentEntity&gt; findAll(Pageable page);  // JPA types in domain
+}
+
+// CLEAN port: domain types only
+public interface PaymentRepository {
+    Optional&lt;Payment&gt; findById(PaymentId id);
+    void save(Payment payment);
+}
+
+// Module wiring at startup
+@Configuration
+class PaymentWiring {
+    @Bean PaymentGatewayPort gateway(StripeClient stripe) {
+        return new StripeGatewayAdapter(stripe);
+    }
+    @Bean PaymentRepository payments(PaymentJpaRepository jpa) {
+        return new JpaPaymentRepository(jpa);
+    }
+}</pre>` },
   ],
   figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Hexagonal Ports &amp; Adapters structure">
-<defs><marker id="fig-hexagonal-ports-adapters-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Hexagonal Ports…</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-hexagonal-ports-adapters-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-hexagonal-ports-adapters-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-hexagonal-ports-adapters-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Hexagonal Ports &amp; Adapters — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Hexagonal Ports & Adapters pattern — components and data flow in Order Service.` }
+    { id: "hex", svg: HEX_SVG, caption: "Driving adapters call inbound ports; the domain calls outbound ports implemented by driven adapters. All dependencies point inward." },
   ],
-  related: ["repository-pattern", "dependency-inversion", "clean-architecture"],
-  
-  
-  template: "layer",
-  sim: () => ({
-    note: `Explore Hexagonal Ports & Adapters in the payment platform.`,
-    toggles: [{ key: "fix", label: "Apply layering", kind: "ok", value: false }],
-    layers: (ctx) => [
-      { name: "API", components: [{ title: "REST/gRPC", active: true }] },
-      { name: "Domain", components: [{ title: "Hexagonal Ports & Adapters", active: ctx.toggles.fix, color: C.accent }] },
-      { name: "Data", components: [{ title: "Ledger", color: C.ledger }, { title: "Queue", color: C.queue }] },
-    ],
-    status: (ctx) => ({ text: ctx.toggles.fix ? "clean separation" : "logic leaks across layers", cls: ctx.toggles.fix ? "ok" : "err" }),
-  }),
+  related: ["layered-architecture", "repository-pattern", "anti-corruption-code-boundary", "aggregate-root"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

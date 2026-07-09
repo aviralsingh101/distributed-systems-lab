@@ -1,7 +1,25 @@
 // @article-v2
+// @sim-lab
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { dataModelTemplate } from "../../../sim/templates/index.js";
+import { createTopicSim } from "../../../sim/lab/registry.js";
+
+const BTREE_SVG = `<svg viewBox="0 0 640 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="B-tree index descending from root to leaf pages">
+  <defs><marker id="fig-indexing-strategies-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
+  <rect x="255" y="20" width="130" height="34" rx="5" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
+  <text x="320" y="42" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="ui-monospace,monospace">root: [ 40 | 80 ]</text>
+  <rect x="60" y="90" width="120" height="30" rx="5" fill="#1a2236" stroke="#5b9dff" stroke-width="1.3"/>
+  <text x="120" y="110" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="ui-monospace,monospace">10 | 25 | 38</text>
+  <rect x="260" y="90" width="120" height="30" rx="5" fill="#1a2236" stroke="#5b9dff" stroke-width="1.3"/>
+  <text x="320" y="110" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="ui-monospace,monospace">45 | 60 | 75</text>
+  <rect x="460" y="90" width="120" height="30" rx="5" fill="#1a2236" stroke="#5b9dff" stroke-width="1.3"/>
+  <text x="520" y="110" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="ui-monospace,monospace">82 | 90 | 99</text>
+  <line x1="290" y1="54" x2="130" y2="88" stroke="#5b9dff" stroke-width="1.3" marker-end="url(#fig-indexing-strategies-arr)"/>
+  <line x1="320" y1="54" x2="320" y2="88" stroke="#5b9dff" stroke-width="1.3" marker-end="url(#fig-indexing-strategies-arr)"/>
+  <line x1="350" y1="54" x2="510" y2="88" stroke="#5b9dff" stroke-width="1.3" marker-end="url(#fig-indexing-strategies-arr)"/>
+  <line x1="60" y1="150" x2="580" y2="150" stroke="#3ddc97" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <text x="320" y="145" text-anchor="middle" fill="#3ddc97" font-size="10" font-family="system-ui">leaf pages linked in sorted order → range scans are cheap</text>
+  <text x="320" y="185" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">O(log n) hops root→leaf; leaves point to the heap row (or hold it, for a clustered index).</text>
+</svg>`;
 
 const topic = makeTopic({
   id: "indexing-strategies",
@@ -9,72 +27,168 @@ const topic = makeTopic({
   category: "lld-db",
   track: "lld",
   tier: "essential",
-  archetype: "pattern",
-  oneliner: `B-tree, covering, and partial indexes.`,
+  archetype: "concept",
+  oneliner: `Choosing the right index — B-tree, composite, covering, or partial — so the planner can find rows without scanning the table.`,
   sections: [
-    { title: `Motivation`, body: `<p>B-tree, covering, and partial indexes.</p>
-<p>Without <b>Indexing Strategies</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Indexing Strategies</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Indexing Strategies</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Indexing Strategies</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Indexing Strategies</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Indexing Strategies</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+    { title: `What an index buys you`, body: `<p>An <b>index</b> is a secondary data structure that lets the database locate rows without reading the whole table. The default in every relational database is the <b>B-tree</b> (technically a B+tree): a balanced, sorted tree with a large fan-out, so a lookup is <code>O(log n)</code> page reads from root to leaf. Because the leaves are kept in sorted order and linked, a B-tree serves equality (<code>=</code>), range (<code>&lt;</code>, <code>BETWEEN</code>), prefix (<code>LIKE 'abc%'</code>), and <code>ORDER BY</code> — all from the same structure.</p>
+<p>Indexes are not free: every index must be updated on <code>INSERT</code>, <code>UPDATE</code>, and <code>DELETE</code>, and it consumes storage and cache. So the goal is the <em>smallest set of indexes</em> that covers your real query shapes, not one index per column.</p>
+<pre>@Entity
+@Table(name = "ledger_entries",
+       indexes = {
+           @Index(name = "idx_ledger_wallet_created",
+                  columnList = "wallet_id, created_at"),
+           @Index(name = "idx_ledger_payment_id",
+                  columnList = "payment_id")
+       })
+public class LedgerEntry {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(name = "wallet_id", nullable = false)
+    private String walletId;
+
+    @Column(name = "payment_id")
+    private String paymentId;
+
+    @Column(name = "amount_minor", nullable = false)
+    private long amountMinor;
+
+    @Column(name = "created_at", nullable = false)
+    private Instant createdAt;
+}</pre>` },
+    { title: `How a B-tree lookup works`, figureAfter: "btree", body: `<p>To resolve <code>WHERE id = 60</code> the engine starts at the root, compares against the separator keys to pick a child, and descends until it reaches the leaf holding 60. The leaf entry points to the row's location in the heap (in Postgres, a table row identifier; in a clustered table like InnoDB's primary key, the leaf <em>contains</em> the row). A range query like <code>WHERE created_at BETWEEN a AND b</code> descends once to the first match, then walks the linked leaves in order — no re-descent per row.</p>
+<pre>// Query backed by idx_ledger_wallet_created — one O(log n) descent
+@Repository
+public interface LedgerEntryRepository extends JpaRepository&lt;LedgerEntry, Long&gt; {
+
+    List&lt;LedgerEntry&gt; findByWalletIdOrderByCreatedAtDesc(
+        String walletId, Pageable pageable);
+
+    // Uses composite index (wallet_id, created_at) for equality + sort
+    @Query("""
+        SELECT e FROM LedgerEntry e
+        WHERE e.walletId = :walletId
+        ORDER BY e.createdAt DESC
+        """)
+    List&lt;LedgerEntry&gt; recentEntries(
+        @Param("walletId") String walletId,
+        Pageable pageable);
+}</pre>` },
+    { title: `Composite and covering indexes`, body: `<p>A <b>composite index</b> on <code>(a, b, c)</code> is sorted by <code>a</code>, then <code>b</code>, then <code>c</code>. This is the <b>leftmost-prefix rule</b>: it supports predicates on <code>a</code>, on <code>(a, b)</code>, and on <code>(a, b, c)</code>, but not on <code>b</code> alone. Column order matters — put equality columns first and the range/sort column last.</p>
+<p>A <b>covering index</b> includes every column a query needs, so the query is answered <em>from the index alone</em> without touching the table (an "index-only scan"). In Postgres you add non-key payload columns with <code>INCLUDE</code>:</p>
+<p><code>CREATE INDEX idx_entry_wallet_created ON ledger_entry (wallet_id, created_at) INCLUDE (amount);</code></p>
+<p>Now "recent entries and amounts for a wallet" needs no heap fetch at all.</p>
+<pre>@Entity
+@Table(name = "payments",
+       indexes = {
+           // Composite: equality on wallet_id, range/sort on created_at
+           @Index(name = "idx_payment_wallet_status_created",
+                  columnList = "wallet_id, status, created_at"),
+           // Covering: all columns needed for balance summary query
+           @Index(name = "idx_payment_wallet_amount",
+                  columnList = "wallet_id, amount_minor, status")
+       })
+public class Payment {
+
+    @Id
+    private String id;
+
+    @Column(name = "wallet_id", nullable = false)
+    private String walletId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false)
+    private PaymentStatus status;
+
+    @Column(name = "amount_minor", nullable = false)
+    private long amountMinor;
+
+    @Column(name = "created_at", nullable = false)
+    private Instant createdAt;
+}</pre>` },
+    { title: `Partial indexes`, body: `<p>A <b>partial index</b> indexes only the rows matching a predicate, keeping it small and cheap to maintain:</p>
+<p><code>CREATE INDEX idx_orders_pending ON "order" (created_at) WHERE status = 'PENDING';</code></p>
+<p>If pending orders are 1% of the table, this index is 1% of the size and is the perfect fit for the "work queue" query that only ever looks at pending rows. Partial indexes also enforce conditional uniqueness — <code>CREATE UNIQUE INDEX ... WHERE deleted_at IS NULL</code> keeps emails unique among live rows while allowing soft-deleted duplicates.</p>
+<pre>// Partial index via DDL migration (JPA @Index does not support WHERE clause)
+// CREATE INDEX idx_payment_pending
+//   ON payments (created_at) WHERE status = 'PENDING';
+
+@Entity
+@Table(name = "payments")
+public class Payment {
+
+    @Id
+    private String id;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false)
+    private PaymentStatus status;
+
+    @Column(name = "created_at", nullable = false)
+    private Instant createdAt;
+}
+
+@Repository
+public interface PaymentRepository extends JpaRepository&lt;Payment, String&gt; {
+
+    // Benefits from idx_payment_pending — small, fast work-queue scan
+    @Query("""
+        SELECT p FROM Payment p
+        WHERE p.status = 'PENDING'
+        ORDER BY p.createdAt ASC
+        """)
+    List&lt;Payment&gt; findPendingPayments(Pageable pageable);
+}</pre>` },
+    { title: `Pagination: offset vs cursor`, body: `<p>Indexing interacts directly with how you page. <b>OFFSET pagination</b> (<code>LIMIT 20 OFFSET 10000</code>) forces the engine to walk and discard the first 10,000 matches on every page — cost grows with page depth, and rows inserted mid-scroll cause skipped or repeated items. <b>Cursor (keyset) pagination</b> instead remembers the last row's sort key and asks for the next slice:</p>
+<p><code>SELECT * FROM ledger_entry WHERE wallet_id = :w AND (created_at, id) &lt; (:last_ts, :last_id) ORDER BY created_at DESC, id DESC LIMIT 20;</code></p>
+<p>Backed by an index on <code>(wallet_id, created_at, id)</code>, every page is an <code>O(log n)</code> seek plus a short scan, and it is stable under concurrent inserts. Use keyset pagination for deep or infinite scroll; reserve OFFSET for small, bounded result sets.</p>
+<pre>@Entity
+@Table(name = "ledger_entries",
+       indexes = @Index(name = "idx_ledger_wallet_created_id",
+                        columnList = "wallet_id, created_at, id"))
+public class LedgerEntry {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(name = "wallet_id", nullable = false)
+    private String walletId;
+
+    @Column(name = "created_at", nullable = false)
+    private Instant createdAt;
+}
+
+@Repository
+public interface LedgerEntryRepository extends JpaRepository&lt;LedgerEntry, Long&gt; {
+
+    // Keyset pagination — indexed seek, stable under concurrent inserts
+    @Query("""
+        SELECT e FROM LedgerEntry e
+        WHERE e.walletId = :walletId
+          AND (:cursorTs IS NULL
+               OR e.createdAt &lt; :cursorTs
+               OR (e.createdAt = :cursorTs AND e.id &lt; :cursorId))
+        ORDER BY e.createdAt DESC, e.id DESC
+        LIMIT :limit
+        """)
+    List&lt;LedgerEntry&gt; findKeysetPage(
+        @Param("walletId") String walletId,
+        @Param("cursorTs") Instant cursorTs,
+        @Param("cursorId") Long cursorId,
+        @Param("limit") int limit);
+}</pre>` },
   ],
   figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Indexing Strategies structure">
-<defs><marker id="fig-indexing-strategies-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Indexing Strate…</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-indexing-strategies-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-indexing-strategies-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-indexing-strategies-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Indexing Strategies — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Indexing Strategies pattern — components and data flow in Order Service.` }
+    { id: "btree", svg: BTREE_SVG, caption: "A B-tree: descend from root through internal nodes to a sorted, linked leaf level. Equality and range queries both start with one O(log n) descent." },
   ],
-  related: [],
-  
-  
-  template: "dataModel",
-  sim: () => ({
-    note: `Explore Indexing Strategies in the payment platform. — schema view`,
-    toggles: [{ key: "fix", label: "Normalized design", kind: "ok", value: false }],
-    tables: (ctx) => ctx.toggles.fix ? [
-      { name: "payments", cols: [{ name: "id", pk: true }, { name: "wallet_id", fk: true }, { name: "amount" }] },
-      { name: "wallets", cols: [{ name: "id", pk: true }, { name: "balance" }] },
-      { name: "outbox", cols: [{ name: "id", pk: true }, { name: "event", fk: true }] },
-    ] : [
-      { name: "everything", cols: [{ name: "blob", pk: true }, { name: "misc" }] },
-    ],
-    relations: [{ from: "payments", to: "wallets" }],
-    status: (ctx) => ({ text: ctx.toggles.fix ? "schema supports Indexing Strategies" : "schema fights the pattern", cls: ctx.toggles.fix ? "ok" : "warn" }),
-  }),
+  related: ["primary-foreign-keys", "denormalization-patterns", "read-replica-routing"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
+
 export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
+  return createTopicSim("indexing-strategies", stage, panel, stageEl);
 }

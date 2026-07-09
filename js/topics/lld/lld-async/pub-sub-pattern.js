@@ -1,7 +1,7 @@
 // @article-v2
+// @sim-lab
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { topologyTemplate } from "../../../sim/templates/index.js";
+import { createTopicSim } from "../../../sim/lab/registry.js";
 
 const topic = makeTopic({
   id: "pub-sub-pattern",
@@ -10,77 +10,59 @@ const topic = makeTopic({
   track: "lld",
   tier: "essential",
   archetype: "pattern",
-  oneliner: `Publish to topic; many subscribe.`,
+  oneliner: `One publisher emits an event to a topic; every interested subscriber receives its own copy — senders and receivers never know each other.`,
   sections: [
-    { title: `Motivation`, body: `<p>Publish to topic; many subscribe.</p>
-<p>Without <b>Pub/Sub</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Pub/Sub</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Pub/Sub</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Pub/Sub</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Pub/Sub</b> changes to production:</p>
+    { title: `What pub/sub is`, body: `<p><b>Publish-subscribe</b> is a one-to-many messaging style. A publisher sends a message to a <b>topic</b> (a named channel) rather than to a specific recipient; the broker delivers a copy to <em>every</em> subscriber of that topic. Publishers and subscribers are fully decoupled — in identity (neither addresses the other), in time (subscribers can be offline and catch up), and in scaling (you add consumers without touching the producer).</p>
+<p>This is the backbone of event-driven architecture. When a charge is captured, <b>Order Service</b> publishes <code>PaymentCaptured</code> once; the Ledger, the notifications service, and the fraud pipeline each react independently, and you can add a fifth consumer next quarter with zero producer changes.</p>` },
+    { title: `Structure: topics, fan-out, and subscriptions`, body: `<p>The defining structural choice is <b>fan-out</b>: one publish becomes N deliveries. Two subscription models exist:</p>
 <ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
+<li><b>Ephemeral / at-most-once</b> (classic Redis pub/sub) — messages are pushed only to subscribers connected right now; there is no retention. Simple, but a disconnected subscriber loses events.</li>
+<li><b>Durable subscriptions</b> (Kafka consumer groups, SNS→SQS, RabbitMQ with durable queues) — the broker retains messages and tracks each subscriber's position, so a subscriber that was down resumes where it left off.</li>
 </ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Pub/Sub</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<p>Contrast with a <b>point-to-point</b> queue where each message goes to exactly one consumer. Pub/sub means each <em>distinct</em> subscriber gets a copy; within one subscriber you can still load-balance across a group so only one instance handles each message.</p>` },
+    { title: `Delivery and ordering semantics`, body: `<p>Most durable pub/sub systems provide <b>at-least-once</b> delivery to each subscription, so every consumer must be idempotent. Ordering is guaranteed only per partition/key: in Kafka, messages with the same key (e.g. <code>wallet_id</code>) land on one partition and are ordered; across partitions there is no global order. Fan-out also means each subscriber advances at its own pace, so two consumers can be at very different offsets.</p>
+<p>Filtering can happen by topic granularity or by message attributes (content-based routing, SNS filter policies), letting a subscriber receive only the subset it cares about instead of the whole firehose.</p>` },
+    { title: `Tradeoffs and when to use it`, body: `<p><b>Strengths:</b> loose coupling, easy extensibility, and natural parallelism — the reasons event-driven systems scale organizationally. <b>Costs:</b> the producer loses visibility into who consumed what and whether they succeeded; debugging spans many independent consumers; and duplicate/reordered delivery pushes correctness work onto every subscriber.</p>
+<p>Reach for pub/sub when multiple independent services must react to the same fact and you want to add consumers without redeploying the producer. Prefer a work queue when a message should be processed <em>once</em> by <em>one</em> worker, and prefer request-reply when the sender needs an answer.</p>
+<pre>// --- Producer: one publish, many independent subscribers ---
+@Service
+public class PaymentEventBroadcaster {
+    private final KafkaTemplate&lt;String, String&gt; kafka;
+
+    @Transactional
+    public void capture(CapturePaymentCommand cmd) {
+        Payment payment = paymentRepo.save(Payment.create(cmd));
+        outbox.save(OutboxEntity.paymentCaptured(payment));
+    }
+}
+
+// Relay publishes to topic "payment.captured" — fan-out handled by broker</pre>
+<pre>// --- Subscriber A: Ledger (own consumer group) ---
+@KafkaListener(topics = "payment.captured", groupId = "ledger-service")
+@Transactional
+public void postEntry(PaymentCapturedEvent e) {
+    inbox.dedup(e.eventId());
+    ledger.post(e);
+}
+
+// --- Subscriber B: Notifications (different group, same topic) ---
+@KafkaListener(topics = "payment.captured", groupId = "notifications")
+public void sendReceipt(PaymentCapturedEvent e) {
+    emailService.sendReceipt(e.customerEmail(), e);
+}
+
+// --- Subscriber C: Fraud (added next quarter — zero producer changes) ---
+@KafkaListener(topics = "payment.captured", groupId = "fraud-scoring")
+public void score(PaymentCapturedEvent e) {
+    fraudEngine.evaluate(e);
+}</pre>` },
   ],
-  figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Pub/Sub structure">
-<defs><marker id="fig-pub-sub-pattern-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Pub/Sub</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-pub-sub-pattern-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-pub-sub-pattern-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-pub-sub-pattern-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Pub/Sub — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Pub/Sub pattern — components and data flow in Order Service.` }
-  ],
-  related: [],
-  
-  
-  template: "topology",
-  sim: () => ({
-    note: `Explore Pub/Sub in the payment platform.`,
-    toggles: [{ key: "fix", label: "Apply Pub/Sub", kind: "ok", value: false }],
-    nodes: (ctx) => [
-      { id: "c", x: 160, y: 280, title: "Client", color: C.client },
-      { id: "o", x: 400, y: 200, title: "Order", color: C.service, active: true },
-      { id: "g", x: 640, y: 280, title: "Gateway", color: C.gateway },
-      { id: "l", x: 500, y: 400, title: "Ledger", color: C.ledger, value: ctx.toggles.fix ? "ok" : "?" },
-      { id: "q", x: 840, y: 200, title: "Queue", color: C.queue },
-    ],
-    edges: (ctx) => [
-      { from: "c", to: "o", active: true },
-      { from: "o", to: "g", active: ctx.toggles.fix },
-      { from: "g", to: "l", active: ctx.toggles.fix },
-      { from: "l", to: "q", active: ctx.toggles.fix, label: "Pub/Sub" },
-    ],
-    activeEdge: (ctx, t) => ctx.toggles.fix ? { from: "l", to: "q" } : { from: "c", to: "o" },
-    status: (ctx) => ({ text: ctx.toggles.fix ? "Pub/Sub in path" : "pattern absent", cls: ctx.toggles.fix ? "ok" : "warn" }),
-  }),
+  related: ["point-to-point", "work-queue", "fire-and-forget", "event-notification-vs-ecst", "event-driven-architecture"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
+
 export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
+  return createTopicSim("pub-sub-pattern", stage, panel, stageEl);
 }

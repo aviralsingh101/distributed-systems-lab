@@ -1,0 +1,2600 @@
+{
+  "version": 1,
+  "topics": {
+    "lost-update": {
+      "sim": "race",
+      "figure": "timeline",
+      "track": "failures",
+      "category": "concurrency",
+      "title": "Lost Update",
+      "priority": "gold"
+    },
+    "toctou": {
+      "sim": "race",
+      "figure": "timeline",
+      "track": "failures",
+      "category": "concurrency",
+      "title": "TOCTOU"
+    },
+    "aba": {
+      "sim": "race",
+      "figure": "none",
+      "track": "failures",
+      "category": "concurrency",
+      "title": "ABA Problem"
+    },
+    "double-spend": {
+      "sim": "race",
+      "figure": "none",
+      "track": "failures",
+      "category": "concurrency",
+      "title": "Double Spend"
+    },
+    "write-skew": {
+      "sim": "race",
+      "figure": "none",
+      "track": "failures",
+      "category": "concurrency",
+      "title": "Write Skew"
+    },
+    "phantom-read": {
+      "sim": "race",
+      "figure": "none",
+      "track": "failures",
+      "category": "concurrency",
+      "title": "Phantom Read"
+    },
+    "dirty-read": {
+      "sim": "race",
+      "figure": "none",
+      "track": "failures",
+      "category": "concurrency",
+      "title": "Dirty Read"
+    },
+    "non-repeatable-read": {
+      "sim": "race",
+      "figure": "none",
+      "track": "failures",
+      "category": "concurrency",
+      "title": "Non-repeatable Read"
+    },
+    "read-skew": {
+      "sim": "race",
+      "figure": "none",
+      "track": "failures",
+      "category": "concurrency",
+      "title": "Read Skew"
+    },
+    "deadlock": {
+      "sim": "race",
+      "figure": "lockTimeline",
+      "track": "failures",
+      "category": "locking",
+      "title": "Deadlock"
+    },
+    "lock-contention": {
+      "sim": "race",
+      "figure": "none",
+      "track": "failures",
+      "category": "locking",
+      "title": "Lock Contention"
+    },
+    "lock-convoy": {
+      "sim": "race",
+      "figure": "none",
+      "track": "failures",
+      "category": "locking",
+      "title": "Lock Convoy"
+    },
+    "priority-inversion": {
+      "sim": "race",
+      "figure": "none",
+      "track": "failures",
+      "category": "locking",
+      "title": "Priority Inversion"
+    },
+    "livelock": {
+      "sim": "race",
+      "figure": "none",
+      "track": "failures",
+      "category": "locking",
+      "title": "Livelock"
+    },
+    "starvation": {
+      "sim": "race",
+      "figure": "none",
+      "track": "failures",
+      "category": "locking",
+      "title": "Starvation"
+    },
+    "retry-storm": {
+      "sim": "metrics",
+      "figure": "retryAmplification",
+      "track": "failures",
+      "category": "retry",
+      "title": "Retry Storm"
+    },
+    "thundering-herd": {
+      "sim": "metrics",
+      "figure": "stampede",
+      "track": "failures",
+      "category": "retry",
+      "title": "Thundering Herd"
+    },
+    "cache-stampede": {
+      "sim": "metrics",
+      "figure": "stampede",
+      "track": "failures",
+      "category": "retry",
+      "title": "Cache Stampede"
+    },
+    "dogpile": {
+      "sim": "metrics",
+      "figure": "none",
+      "track": "failures",
+      "category": "retry",
+      "title": "Dogpile Effect"
+    },
+    "retry-amplification": {
+      "sim": "metrics",
+      "figure": "retryAmplification",
+      "track": "failures",
+      "category": "retry",
+      "title": "Retry Amplification"
+    },
+    "coordinated-omission": {
+      "sim": "metrics",
+      "figure": "none",
+      "track": "failures",
+      "category": "retry",
+      "title": "Coordinated Omission"
+    },
+    "cache-invalidation": {
+      "sim": "metrics",
+      "figure": "none",
+      "track": "failures",
+      "category": "cache",
+      "title": "Cache Invalidation"
+    },
+    "cache-consistency": {
+      "sim": "metrics",
+      "figure": "none",
+      "track": "failures",
+      "category": "cache",
+      "title": "Cache Consistency"
+    },
+    "hot-key": {
+      "sim": "metrics",
+      "figure": "none",
+      "track": "failures",
+      "category": "cache",
+      "title": "Hot Key"
+    },
+    "cache-pollution": {
+      "sim": "metrics",
+      "figure": "none",
+      "track": "failures",
+      "category": "cache",
+      "title": "Cache Pollution"
+    },
+    "poison-message": {
+      "sim": "queue",
+      "figure": "none",
+      "track": "failures",
+      "category": "messaging",
+      "title": "Poison Message"
+    },
+    "backpressure": {
+      "sim": "queue",
+      "figure": "none",
+      "track": "failures",
+      "category": "messaging",
+      "title": "Backpressure"
+    },
+    "slow-consumer": {
+      "sim": "queue",
+      "figure": "none",
+      "track": "failures",
+      "category": "messaging",
+      "title": "Slow Consumer"
+    },
+    "head-of-line-blocking": {
+      "sim": "queue",
+      "figure": "none",
+      "track": "failures",
+      "category": "messaging",
+      "title": "Head-of-line Blocking"
+    },
+    "partial-failure": {
+      "sim": "state",
+      "figure": "none",
+      "track": "failures",
+      "category": "failure",
+      "title": "Partial Failure"
+    },
+    "cascading-failure": {
+      "sim": "state",
+      "figure": "domino",
+      "track": "failures",
+      "category": "failure",
+      "title": "Cascading Failure"
+    },
+    "bulkhead": {
+      "sim": "state",
+      "figure": "stateMachine",
+      "track": "failures",
+      "category": "failure",
+      "title": "Bulkhead Isolation"
+    },
+    "circuit-breaker": {
+      "sim": "state",
+      "figure": "stateMachine",
+      "track": "failures",
+      "category": "failure",
+      "title": "Circuit Breaker",
+      "priority": "gold"
+    },
+    "fail-fast": {
+      "sim": "state",
+      "figure": "none",
+      "track": "failures",
+      "category": "failure",
+      "title": "Fail Fast"
+    },
+    "graceful-degradation": {
+      "sim": "state",
+      "figure": "none",
+      "track": "failures",
+      "category": "failure",
+      "title": "Graceful Degradation"
+    },
+    "brownout": {
+      "sim": "state",
+      "figure": "none",
+      "track": "failures",
+      "category": "failure",
+      "title": "Brownout"
+    },
+    "connection-pool-exhaustion": {
+      "sim": "metrics",
+      "figure": "poolExhaustion",
+      "track": "failures",
+      "category": "prod-eng",
+      "title": "Connection Pool Exhaustion"
+    },
+    "ephemeral-port-exhaustion": {
+      "sim": "metrics",
+      "figure": "none",
+      "track": "failures",
+      "category": "prod-eng",
+      "title": "Ephemeral Port Exhaustion"
+    },
+    "n-plus-one": {
+      "sim": "metrics",
+      "figure": "fanOut",
+      "track": "failures",
+      "category": "prod-eng",
+      "title": "N+1 Query Problem"
+    },
+    "slow-query-amplification": {
+      "sim": "metrics",
+      "figure": "none",
+      "track": "failures",
+      "category": "prod-eng",
+      "title": "Slow Query Amplification"
+    },
+    "noisy-neighbor": {
+      "sim": "metrics",
+      "figure": "none",
+      "track": "failures",
+      "category": "prod-eng",
+      "title": "Noisy Neighbor"
+    },
+    "priority-queue-starvation": {
+      "sim": "metrics",
+      "figure": "none",
+      "track": "failures",
+      "category": "prod-eng",
+      "title": "Priority Queue Starvation"
+    },
+    "system-design-framework": {
+      "sim": "none",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-foundations",
+      "title": "System Design Framework"
+    },
+    "requirements-gathering": {
+      "sim": "none",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-foundations",
+      "title": "Requirements Gathering"
+    },
+    "non-functional-requirements": {
+      "sim": "none",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-foundations",
+      "title": "Non-Functional Requirements"
+    },
+    "back-of-envelope-estimation": {
+      "sim": "none",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-foundations",
+      "title": "Back-of-Envelope Estimation"
+    },
+    "qps-latency-storage-math": {
+      "sim": "none",
+      "figure": "comparison",
+      "track": "hld",
+      "category": "hld-foundations",
+      "title": "QPS / Latency / Storage Math"
+    },
+    "sla-vs-slo": {
+      "sim": "none",
+      "figure": "comparison",
+      "track": "hld",
+      "category": "hld-foundations",
+      "title": "SLA vs SLO"
+    },
+    "conways-law": {
+      "sim": "none",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-foundations",
+      "title": "Conway's Law"
+    },
+    "technical-debt-vs-velocity": {
+      "sim": "none",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-foundations",
+      "title": "Technical Debt vs Velocity"
+    },
+    "dns": {
+      "sim": "clickFlow",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-networking",
+      "title": "DNS",
+      "priority": "gold"
+    },
+    "tcp-udp-tradeoffs": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-networking",
+      "title": "TCP vs UDP"
+    },
+    "http-evolution": {
+      "sim": "clickFlow",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-networking",
+      "title": "HTTP/1.1 → HTTP/2 → HTTP/3"
+    },
+    "grpc": {
+      "sim": "clickFlow",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-networking",
+      "title": "gRPC"
+    },
+    "websockets": {
+      "sim": "clickFlow",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-networking",
+      "title": "WebSockets"
+    },
+    "sse": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-networking",
+      "title": "Server-Sent Events"
+    },
+    "long-polling": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-networking",
+      "title": "Long Polling"
+    },
+    "webhooks": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-networking",
+      "title": "Webhooks"
+    },
+    "rest-vs-graphql": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-networking",
+      "title": "REST vs GraphQL"
+    },
+    "tls-termination": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-networking",
+      "title": "TLS Termination"
+    },
+    "load-balancer-l4-l7": {
+      "sim": "architecture",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-blocks",
+      "title": "Load Balancer (L4 / L7)"
+    },
+    "reverse-proxy": {
+      "sim": "architecture",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-blocks",
+      "title": "Reverse Proxy"
+    },
+    "api-gateway": {
+      "sim": "architecture",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-blocks",
+      "title": "API Gateway"
+    },
+    "cdn": {
+      "sim": "architecture",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-blocks",
+      "title": "CDN"
+    },
+    "caching-tiers": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-blocks",
+      "title": "Caching Tiers"
+    },
+    "sql-vs-nosql-selection": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-blocks",
+      "title": "SQL vs NoSQL Selection"
+    },
+    "partitioning-schemes": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-blocks",
+      "title": "Partitioning Schemes"
+    },
+    "replication-topologies": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-blocks",
+      "title": "Replication Topologies"
+    },
+    "message-queues": {
+      "sim": "architecture",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-blocks",
+      "title": "Message Queues"
+    },
+    "kafka-vs-rabbitmq": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-blocks",
+      "title": "Kafka vs RabbitMQ"
+    },
+    "pub-sub-fanout": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-blocks",
+      "title": "Pub/Sub Fan-out"
+    },
+    "edge-rate-limiting": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-blocks",
+      "title": "Edge Rate Limiting"
+    },
+    "service-discovery": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-blocks",
+      "title": "Service Discovery"
+    },
+    "service-mesh": {
+      "sim": "architecture",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-blocks",
+      "title": "Service Mesh"
+    },
+    "blob-storage": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-blocks",
+      "title": "Blob Storage"
+    },
+    "edge-compute": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-blocks",
+      "title": "Edge Compute"
+    },
+    "consensus-raft-paxos": {
+      "sim": "state",
+      "figure": "consensus",
+      "track": "hld",
+      "category": "hld-theory",
+      "title": "Consensus (Raft / Paxos)"
+    },
+    "linearizability-vs-serializability": {
+      "sim": "none",
+      "figure": "comparison",
+      "track": "hld",
+      "category": "hld-theory",
+      "title": "Linearizability vs Serializability",
+      "figureOpts": {
+        "left": "Linearizability",
+        "right": "Serializability"
+      }
+    },
+    "quorum-reads-writes": {
+      "sim": "state",
+      "figure": "quorum",
+      "track": "hld",
+      "category": "hld-theory",
+      "title": "Quorum Reads / Writes"
+    },
+    "cap-theorem-framing": {
+      "sim": "state",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-theory",
+      "title": "CAP Theorem (HLD framing)"
+    },
+    "pacelc": {
+      "sim": "state",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-theory",
+      "title": "PACELC"
+    },
+    "hybrid-logical-clocks": {
+      "sim": "none",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-theory",
+      "title": "Hybrid Logical Clocks"
+    },
+    "crdt-overview": {
+      "sim": "none",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-theory",
+      "title": "CRDT Overview"
+    },
+    "distributed-transactions-comparison": {
+      "sim": "none",
+      "figure": "comparison",
+      "track": "hld",
+      "category": "hld-theory",
+      "title": "Distributed Transactions",
+      "figureOpts": {
+        "left": "2PC / Saga",
+        "right": "TCC / Outbox"
+      }
+    },
+    "exactly-once-honesty": {
+      "sim": "none",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-theory",
+      "title": "Exactly-Once Honesty"
+    },
+    "phi-accrual-failure-detection": {
+      "sim": "none",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-theory",
+      "title": "Phi Accrual Failure Detection"
+    },
+    "consistent-hashing-placement": {
+      "sim": "algorithm",
+      "figure": "hashRing",
+      "track": "hld",
+      "category": "hld-theory",
+      "title": "Consistent Hashing (placement)"
+    },
+    "merkle-anti-entropy": {
+      "sim": "none",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-theory",
+      "title": "Merkle Anti-Entropy"
+    },
+    "btree-vs-lsm": {
+      "sim": "none",
+      "figure": "comparison",
+      "track": "hld",
+      "category": "hld-data",
+      "title": "B-Tree vs LSM",
+      "figureOpts": {
+        "left": "B-tree (read-heavy)",
+        "right": "LSM (write-heavy)"
+      }
+    },
+    "oltp-vs-olap": {
+      "sim": "none",
+      "figure": "comparison",
+      "track": "hld",
+      "category": "hld-data",
+      "title": "OLTP vs OLAP",
+      "figureOpts": {
+        "left": "OLTP (row writes)",
+        "right": "OLAP (column scans)"
+      }
+    },
+    "warehouse-lake-lakehouse": {
+      "sim": "none",
+      "figure": "comparison",
+      "track": "hld",
+      "category": "hld-data",
+      "title": "Warehouse vs Lake vs Lakehouse",
+      "figureOpts": {
+        "left": "Warehouse / Lake",
+        "right": "Lakehouse"
+      }
+    },
+    "lambda-vs-kappa": {
+      "sim": "none",
+      "figure": "comparison",
+      "track": "hld",
+      "category": "hld-data",
+      "title": "Lambda vs Kappa",
+      "figureOpts": {
+        "left": "Lambda (batch + speed)",
+        "right": "Kappa (stream-only)"
+      }
+    },
+    "cdc": {
+      "sim": "none",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-data",
+      "title": "Change Data Capture"
+    },
+    "search-inverted-index": {
+      "sim": "none",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-data",
+      "title": "Search / Inverted Index"
+    },
+    "time-series-db": {
+      "sim": "none",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-data",
+      "title": "Time-Series DB"
+    },
+    "graph-db": {
+      "sim": "none",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-data",
+      "title": "Graph DB"
+    },
+    "vector-db-ann": {
+      "sim": "none",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-data",
+      "title": "Vector DB / ANN"
+    },
+    "key-value-stores": {
+      "sim": "none",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-data",
+      "title": "Key-Value Stores"
+    },
+    "materialized-views": {
+      "sim": "none",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-data",
+      "title": "Materialized Views"
+    },
+    "stream-table-duality": {
+      "sim": "none",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-data",
+      "title": "Stream-Table Duality"
+    },
+    "monolith-vs-microservices": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "hld",
+      "category": "hld-architecture",
+      "title": "Monolith vs Microservices"
+    },
+    "event-driven-architecture": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "hld",
+      "category": "hld-architecture",
+      "title": "Event-Driven Architecture"
+    },
+    "cqrs": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "hld",
+      "category": "hld-architecture",
+      "title": "CQRS"
+    },
+    "event-sourcing": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "hld",
+      "category": "hld-architecture",
+      "title": "Event Sourcing"
+    },
+    "serverless-faas": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "hld",
+      "category": "hld-architecture",
+      "title": "Serverless / FaaS"
+    },
+    "bff": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "hld",
+      "category": "hld-architecture",
+      "title": "Backend for Frontend"
+    },
+    "strangler-fig": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "hld",
+      "category": "hld-architecture",
+      "title": "Strangler Fig"
+    },
+    "hexagonal-clean-architecture": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "hld",
+      "category": "hld-architecture",
+      "title": "Hexagonal / Clean Architecture"
+    },
+    "anti-corruption-layer": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "hld",
+      "category": "hld-architecture",
+      "title": "Anti-Corruption Layer"
+    },
+    "multi-region-active-active": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "hld",
+      "category": "hld-architecture",
+      "title": "Multi-Region Active-Active"
+    },
+    "multi-tenancy-patterns": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "hld",
+      "category": "hld-architecture",
+      "title": "Multi-Tenancy Patterns"
+    },
+    "local-first-crdt-apps": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "hld",
+      "category": "hld-architecture",
+      "title": "Local-First / CRDT Apps"
+    },
+    "cell-architecture-design": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "hld",
+      "category": "hld-architecture",
+      "title": "Cell Architecture (design)"
+    },
+    "scatter-gather": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "hld",
+      "category": "hld-architecture",
+      "title": "Scatter-Gather"
+    },
+    "observability-three-pillars": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-reliability",
+      "title": "Observability Pillars"
+    },
+    "sli-slo-error-budgets": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-reliability",
+      "title": "SLI / SLO / Error Budgets"
+    },
+    "resilience-patterns-overview": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-reliability",
+      "title": "Resilience Patterns Overview"
+    },
+    "graceful-degradation-hld": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-reliability",
+      "title": "Graceful Degradation"
+    },
+    "autoscaling-hpa": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-reliability",
+      "title": "Autoscaling / HPA"
+    },
+    "deploy-strategies": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-reliability",
+      "title": "Deploy Strategies"
+    },
+    "chaos-engineering": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-reliability",
+      "title": "Chaos Engineering"
+    },
+    "incident-response": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-reliability",
+      "title": "Incident Response"
+    },
+    "health-probes": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-reliability",
+      "title": "Health / Readiness / Liveness"
+    },
+    "finops": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-reliability",
+      "title": "FinOps"
+    },
+    "platform-engineering-idp": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-reliability",
+      "title": "Platform Engineering / IDP"
+    },
+    "poison-pill-handling": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-reliability",
+      "title": "Poison Pill Handling"
+    },
+    "authn-vs-authz": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-security",
+      "title": "AuthN vs AuthZ"
+    },
+    "oauth2-oidc": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-security",
+      "title": "OAuth2 / OIDC"
+    },
+    "jwt-pitfalls": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-security",
+      "title": "JWT Pitfalls"
+    },
+    "mtls-service-identity": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-security",
+      "title": "mTLS / Service Identity"
+    },
+    "secrets-management": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-security",
+      "title": "Secrets Management"
+    },
+    "ddos-mitigation": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-security",
+      "title": "DDoS Mitigation"
+    },
+    "waf": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-security",
+      "title": "WAF"
+    },
+    "zero-trust-perimeter": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "hld",
+      "category": "hld-security",
+      "title": "Zero-Trust Perimeter"
+    },
+    "strong-vs-eventual-consistency": {
+      "sim": "none",
+      "figure": "comparison",
+      "track": "hld",
+      "category": "hld-tradeoffs",
+      "title": "Strong vs Eventual Consistency"
+    },
+    "acid-vs-base": {
+      "sim": "none",
+      "figure": "comparison",
+      "track": "hld",
+      "category": "hld-tradeoffs",
+      "title": "ACID vs BASE"
+    },
+    "sql-vs-nosql": {
+      "sim": "none",
+      "figure": "comparison",
+      "track": "hld",
+      "category": "hld-tradeoffs",
+      "title": "SQL vs NoSQL"
+    },
+    "latency-vs-throughput": {
+      "sim": "none",
+      "figure": "comparison",
+      "track": "hld",
+      "category": "hld-tradeoffs",
+      "title": "Latency vs Throughput"
+    },
+    "cache-strategies": {
+      "sim": "none",
+      "figure": "comparison",
+      "track": "hld",
+      "category": "hld-tradeoffs",
+      "title": "Cache Strategies"
+    },
+    "batch-vs-stream": {
+      "sim": "none",
+      "figure": "comparison",
+      "track": "hld",
+      "category": "hld-tradeoffs",
+      "title": "Batch vs Stream"
+    },
+    "lb-vs-proxy-vs-gateway": {
+      "sim": "none",
+      "figure": "comparison",
+      "track": "hld",
+      "category": "hld-tradeoffs",
+      "title": "LB vs Proxy vs Gateway"
+    },
+    "rest-vs-grpc-vs-graphql": {
+      "sim": "none",
+      "figure": "comparison",
+      "track": "hld",
+      "category": "hld-tradeoffs",
+      "title": "REST vs gRPC vs GraphQL"
+    },
+    "polling-vs-websocket-family": {
+      "sim": "none",
+      "figure": "comparison",
+      "track": "hld",
+      "category": "hld-tradeoffs",
+      "title": "Polling vs WebSocket Family"
+    },
+    "rate-limit-algorithms": {
+      "sim": "none",
+      "figure": "comparison",
+      "track": "hld",
+      "category": "hld-tradeoffs",
+      "title": "Rate-Limit Algorithms"
+    },
+    "partitioning-schemes-tradeoff": {
+      "sim": "none",
+      "figure": "comparison",
+      "track": "hld",
+      "category": "hld-tradeoffs",
+      "title": "Partitioning Schemes"
+    },
+    "replication-topologies-tradeoff": {
+      "sim": "none",
+      "figure": "comparison",
+      "track": "hld",
+      "category": "hld-tradeoffs",
+      "title": "Replication Topologies"
+    },
+    "two-pc-vs-saga-vs-tcc": {
+      "sim": "none",
+      "figure": "comparison",
+      "track": "hld",
+      "category": "hld-tradeoffs",
+      "title": "2PC vs Saga vs TCC"
+    },
+    "push-vs-pull": {
+      "sim": "none",
+      "figure": "comparison",
+      "track": "hld",
+      "category": "hld-tradeoffs",
+      "title": "Push vs Pull"
+    },
+    "lambda-vs-kappa-tradeoff": {
+      "sim": "none",
+      "figure": "comparison",
+      "track": "hld",
+      "category": "hld-tradeoffs",
+      "title": "Lambda vs Kappa"
+    },
+    "vertical-vs-horizontal-scale": {
+      "sim": "none",
+      "figure": "comparison",
+      "track": "hld",
+      "category": "hld-tradeoffs",
+      "title": "Vertical vs Horizontal Scale"
+    },
+    "normalization-vs-denormalization": {
+      "sim": "none",
+      "figure": "comparison",
+      "track": "hld",
+      "category": "hld-tradeoffs",
+      "title": "Normalization vs Denormalization"
+    },
+    "single-vs-multi-region": {
+      "sim": "none",
+      "figure": "comparison",
+      "track": "hld",
+      "category": "hld-tradeoffs",
+      "title": "Single vs Multi-Region"
+    },
+    "sync-vs-async-communication": {
+      "sim": "none",
+      "figure": "comparison",
+      "track": "hld",
+      "category": "hld-tradeoffs",
+      "title": "Sync vs Async Communication"
+    },
+    "stateful-vs-stateless": {
+      "sim": "none",
+      "figure": "comparison",
+      "track": "hld",
+      "category": "hld-tradeoffs",
+      "title": "Stateful vs Stateless Services"
+    },
+    "pessimistic-vs-optimistic-concurrency": {
+      "sim": "none",
+      "figure": "comparison",
+      "track": "hld",
+      "category": "hld-tradeoffs",
+      "title": "Pessimistic vs Optimistic"
+    },
+    "managed-vs-self-hosted": {
+      "sim": "none",
+      "figure": "comparison",
+      "track": "hld",
+      "category": "hld-tradeoffs",
+      "title": "Managed vs Self-Hosted"
+    },
+    "url-shortener": {
+      "sim": "architecture",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-classics",
+      "title": "URL Shortener"
+    },
+    "rate-limiter-service": {
+      "sim": "architecture",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-classics",
+      "title": "Rate Limiter Service"
+    },
+    "news-feed": {
+      "sim": "architecture",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-classics",
+      "title": "News Feed"
+    },
+    "notification-system": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "hld",
+      "category": "hld-classics",
+      "title": "Notification System"
+    },
+    "chat-system": {
+      "sim": "architecture",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-classics",
+      "title": "Chat System"
+    },
+    "file-storage-s3": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "hld",
+      "category": "hld-classics",
+      "title": "File Storage (S3-like)"
+    },
+    "search-autocomplete": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "hld",
+      "category": "hld-classics",
+      "title": "Search Autocomplete"
+    },
+    "distributed-cache-design": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "hld",
+      "category": "hld-classics",
+      "title": "Distributed Cache Design"
+    },
+    "payment-system-hld": {
+      "sim": "architecture",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-classics",
+      "title": "Payment System (HLD)"
+    },
+    "ride-sharing-dispatch": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "hld",
+      "category": "hld-classics",
+      "title": "Ride-Sharing Dispatch"
+    },
+    "ticket-booking": {
+      "sim": "architecture",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-classics",
+      "title": "Ticket Booking"
+    },
+    "video-streaming": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "hld",
+      "category": "hld-classics",
+      "title": "Video Streaming"
+    },
+    "metrics-monitoring-system": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "hld",
+      "category": "hld-classics",
+      "title": "Metrics / Monitoring System"
+    },
+    "distributed-cron": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "hld",
+      "category": "hld-classics",
+      "title": "Distributed Cron"
+    },
+    "leaderboard": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "hld",
+      "category": "hld-classics",
+      "title": "Leaderboard"
+    },
+    "collaborative-editor": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "hld",
+      "category": "hld-classics",
+      "title": "Collaborative Editor"
+    },
+    "cap-theorem": {
+      "sim": "clickFlow",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-consistency",
+      "title": "CAP Theorem"
+    },
+    "eventual-consistency": {
+      "sim": "clickFlow",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-consistency",
+      "title": "Eventual Consistency"
+    },
+    "read-your-writes": {
+      "sim": "clickFlow",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-consistency",
+      "title": "Read Your Writes",
+      "priority": "gold"
+    },
+    "monotonic-reads": {
+      "sim": "clickFlow",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-consistency",
+      "title": "Monotonic Reads"
+    },
+    "session-consistency": {
+      "sim": "clickFlow",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-consistency",
+      "title": "Session Consistency"
+    },
+    "quorum": {
+      "sim": "clickFlow",
+      "figure": "quorum",
+      "track": "hld",
+      "category": "hld-consistency",
+      "title": "Quorum"
+    },
+    "crdt": {
+      "sim": "clickFlow",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-consistency",
+      "title": "CRDT"
+    },
+    "hot-partition": {
+      "sim": "algorithm",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-db-scaling",
+      "title": "Hot Partition"
+    },
+    "hot-row": {
+      "sim": "algorithm",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-db-scaling",
+      "title": "Hot Row"
+    },
+    "hot-index": {
+      "sim": "algorithm",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-db-scaling",
+      "title": "Hot Index"
+    },
+    "secondary-index-lag": {
+      "sim": "algorithm",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-db-scaling",
+      "title": "Secondary Index Lag"
+    },
+    "read-replica-lag": {
+      "sim": "algorithm",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-db-scaling",
+      "title": "Read Replica Lag"
+    },
+    "split-brain": {
+      "sim": "algorithm",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-db-scaling",
+      "title": "Split Brain"
+    },
+    "shard-rebalancing": {
+      "sim": "algorithm",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-db-scaling",
+      "title": "Shard Rebalancing"
+    },
+    "consistent-hashing": {
+      "sim": "algorithm",
+      "figure": "hashRing",
+      "track": "hld",
+      "category": "hld-db-scaling",
+      "title": "Consistent Hashing"
+    },
+    "cross-shard-txn": {
+      "sim": "algorithm",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-db-scaling",
+      "title": "Cross-Shard Transaction"
+    },
+    "tail-latency": {
+      "sim": "metrics",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-performance",
+      "title": "Tail Latency"
+    },
+    "queue-buildup": {
+      "sim": "metrics",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-performance",
+      "title": "Queue Buildup"
+    },
+    "littles-law": {
+      "sim": "metrics",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-performance",
+      "title": "Little's Law"
+    },
+    "coordinated-omission-perf": {
+      "sim": "metrics",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-performance",
+      "title": "Coordinated Omission"
+    },
+    "false-sharing": {
+      "sim": "metrics",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-performance",
+      "title": "False Sharing"
+    },
+    "numa": {
+      "sim": "metrics",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-performance",
+      "title": "NUMA Effects"
+    },
+    "context-switching": {
+      "sim": "metrics",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-performance",
+      "title": "Context Switching"
+    },
+    "gc-pause": {
+      "sim": "metrics",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-performance",
+      "title": "GC Pause"
+    },
+    "write-through": {
+      "sim": "clickFlow",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-cache-strategies",
+      "title": "Write Through"
+    },
+    "write-around": {
+      "sim": "clickFlow",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-cache-strategies",
+      "title": "Write Around"
+    },
+    "write-back": {
+      "sim": "clickFlow",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-cache-strategies",
+      "title": "Write Back"
+    },
+    "read-through": {
+      "sim": "clickFlow",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-cache-strategies",
+      "title": "Read Through"
+    },
+    "cache-aside": {
+      "sim": "clickFlow",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-cache-strategies",
+      "title": "Cache Aside"
+    },
+    "negative-cache": {
+      "sim": "clickFlow",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-cache-strategies",
+      "title": "Negative Cache"
+    },
+    "hedged-requests": {
+      "sim": "metrics",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-rate-limiting",
+      "title": "Hedged Requests"
+    },
+    "request-coalescing": {
+      "sim": "metrics",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-rate-limiting",
+      "title": "Request Coalescing"
+    },
+    "token-bucket": {
+      "sim": "metrics",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-rate-limiting",
+      "title": "Token Bucket",
+      "priority": "gold"
+    },
+    "leaky-bucket": {
+      "sim": "metrics",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-rate-limiting",
+      "title": "Leaky Bucket",
+      "priority": "gold"
+    },
+    "adaptive-concurrency": {
+      "sim": "metrics",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-rate-limiting",
+      "title": "Adaptive Concurrency Control"
+    },
+    "load-shedding": {
+      "sim": "metrics",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-rate-limiting",
+      "title": "Load Shedding"
+    },
+    "admission-control": {
+      "sim": "metrics",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-rate-limiting",
+      "title": "Admission Control"
+    },
+    "shuffle-sharding": {
+      "sim": "metrics",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-rate-limiting",
+      "title": "Shuffle Sharding"
+    },
+    "cell-architecture": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "hld",
+      "category": "hld-rate-limiting",
+      "title": "Cell Architecture"
+    },
+    "sticky-sessions": {
+      "sim": "metrics",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-rate-limiting",
+      "title": "Sticky Sessions"
+    },
+    "watermarking": {
+      "sim": "metrics",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-rate-limiting",
+      "title": "Watermarking"
+    },
+    "gossip-protocols": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "hld",
+      "category": "hld-rate-limiting",
+      "title": "Gossip Protocols"
+    },
+    "dead-letter-queue": {
+      "sim": "queue",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-messaging-ops",
+      "title": "Dead Letter Queue",
+      "priority": "gold"
+    },
+    "visibility-timeout": {
+      "sim": "queue",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-messaging-ops",
+      "title": "Visibility Timeout"
+    },
+    "consumer-rebalancing": {
+      "sim": "queue",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-messaging-ops",
+      "title": "Consumer Group Rebalancing"
+    },
+    "exponential-backoff": {
+      "sim": "metrics",
+      "figure": "none",
+      "track": "hld",
+      "category": "hld-reliability-patterns",
+      "title": "Exponential Backoff + Jitter"
+    },
+    "encapsulation": {
+      "sim": "none",
+      "figure": "umlClass",
+      "track": "lld",
+      "category": "lld-oop",
+      "title": "Encapsulation"
+    },
+    "abstraction": {
+      "sim": "none",
+      "figure": "umlClass",
+      "track": "lld",
+      "category": "lld-oop",
+      "title": "Abstraction"
+    },
+    "inheritance-pitfalls": {
+      "sim": "none",
+      "figure": "umlClass",
+      "track": "lld",
+      "category": "lld-oop",
+      "title": "Inheritance Pitfalls"
+    },
+    "polymorphism": {
+      "sim": "none",
+      "figure": "umlClass",
+      "track": "lld",
+      "category": "lld-oop",
+      "title": "Polymorphism"
+    },
+    "composition-over-inheritance": {
+      "sim": "none",
+      "figure": "umlClass",
+      "track": "lld",
+      "category": "lld-oop",
+      "title": "Composition over Inheritance"
+    },
+    "single-responsibility-principle": {
+      "sim": "none",
+      "figure": "umlClass",
+      "track": "lld",
+      "category": "lld-oop",
+      "title": "Single Responsibility"
+    },
+    "open-closed-principle": {
+      "sim": "none",
+      "figure": "umlClass",
+      "track": "lld",
+      "category": "lld-oop",
+      "title": "Open/Closed Principle"
+    },
+    "liskov-substitution-principle": {
+      "sim": "none",
+      "figure": "umlClass",
+      "track": "lld",
+      "category": "lld-oop",
+      "title": "Liskov Substitution"
+    },
+    "interface-segregation-principle": {
+      "sim": "none",
+      "figure": "umlClass",
+      "track": "lld",
+      "category": "lld-oop",
+      "title": "Interface Segregation"
+    },
+    "dependency-inversion-principle": {
+      "sim": "none",
+      "figure": "umlClass",
+      "track": "lld",
+      "category": "lld-oop",
+      "title": "Dependency Inversion"
+    },
+    "dry-principle": {
+      "sim": "none",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-oop",
+      "title": "DRY"
+    },
+    "kiss-yagni-principles": {
+      "sim": "none",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-oop",
+      "title": "KISS & YAGNI"
+    },
+    "singleton": {
+      "sim": "clickFlow",
+      "figure": "umlClass",
+      "track": "lld",
+      "category": "lld-creational",
+      "title": "Singleton"
+    },
+    "factory-method": {
+      "sim": "none",
+      "figure": "umlClass",
+      "track": "lld",
+      "category": "lld-creational",
+      "title": "Factory Method"
+    },
+    "abstract-factory": {
+      "sim": "none",
+      "figure": "umlClass",
+      "track": "lld",
+      "category": "lld-creational",
+      "title": "Abstract Factory"
+    },
+    "builder": {
+      "sim": "none",
+      "figure": "umlClass",
+      "track": "lld",
+      "category": "lld-creational",
+      "title": "Builder"
+    },
+    "prototype": {
+      "sim": "none",
+      "figure": "umlClass",
+      "track": "lld",
+      "category": "lld-creational",
+      "title": "Prototype"
+    },
+    "object-pool": {
+      "sim": "none",
+      "figure": "umlClass",
+      "track": "lld",
+      "category": "lld-creational",
+      "title": "Object Pool"
+    },
+    "dependency-injection": {
+      "sim": "none",
+      "figure": "umlClass",
+      "track": "lld",
+      "category": "lld-creational",
+      "title": "Dependency Injection"
+    },
+    "adapter": {
+      "sim": "none",
+      "figure": "umlClass",
+      "track": "lld",
+      "category": "lld-structural",
+      "title": "Adapter"
+    },
+    "bridge": {
+      "sim": "none",
+      "figure": "umlClass",
+      "track": "lld",
+      "category": "lld-structural",
+      "title": "Bridge"
+    },
+    "composite": {
+      "sim": "none",
+      "figure": "umlClass",
+      "track": "lld",
+      "category": "lld-structural",
+      "title": "Composite"
+    },
+    "decorator": {
+      "sim": "none",
+      "figure": "umlClass",
+      "track": "lld",
+      "category": "lld-structural",
+      "title": "Decorator"
+    },
+    "facade": {
+      "sim": "none",
+      "figure": "umlClass",
+      "track": "lld",
+      "category": "lld-structural",
+      "title": "Facade"
+    },
+    "flyweight": {
+      "sim": "none",
+      "figure": "umlClass",
+      "track": "lld",
+      "category": "lld-structural",
+      "title": "Flyweight"
+    },
+    "proxy": {
+      "sim": "none",
+      "figure": "umlClass",
+      "track": "lld",
+      "category": "lld-structural",
+      "title": "Proxy"
+    },
+    "module-pattern": {
+      "sim": "none",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-structural",
+      "title": "Module Pattern"
+    },
+    "strategy": {
+      "sim": "clickFlow",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-behavioral",
+      "title": "Strategy"
+    },
+    "observer": {
+      "sim": "clickFlow",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-behavioral",
+      "title": "Observer"
+    },
+    "command": {
+      "sim": "none",
+      "figure": "umlClass",
+      "track": "lld",
+      "category": "lld-behavioral",
+      "title": "Command"
+    },
+    "state": {
+      "sim": "clickFlow",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-behavioral",
+      "title": "State"
+    },
+    "template-method": {
+      "sim": "none",
+      "figure": "umlClass",
+      "track": "lld",
+      "category": "lld-behavioral",
+      "title": "Template Method"
+    },
+    "iterator": {
+      "sim": "none",
+      "figure": "umlClass",
+      "track": "lld",
+      "category": "lld-behavioral",
+      "title": "Iterator"
+    },
+    "chain-of-responsibility": {
+      "sim": "none",
+      "figure": "umlClass",
+      "track": "lld",
+      "category": "lld-behavioral",
+      "title": "Chain of Responsibility"
+    },
+    "mediator": {
+      "sim": "none",
+      "figure": "umlClass",
+      "track": "lld",
+      "category": "lld-behavioral",
+      "title": "Mediator"
+    },
+    "memento": {
+      "sim": "none",
+      "figure": "umlClass",
+      "track": "lld",
+      "category": "lld-behavioral",
+      "title": "Memento"
+    },
+    "visitor": {
+      "sim": "none",
+      "figure": "umlClass",
+      "track": "lld",
+      "category": "lld-behavioral",
+      "title": "Visitor"
+    },
+    "interpreter": {
+      "sim": "none",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-behavioral",
+      "title": "Interpreter"
+    },
+    "specification-pattern": {
+      "sim": "none",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-behavioral",
+      "title": "Specification Pattern"
+    },
+    "transactional-outbox": {
+      "sim": "clickFlow",
+      "figure": "outboxFlow",
+      "track": "lld",
+      "category": "lld-dist-patterns",
+      "title": "Transactional Outbox",
+      "priority": "gold"
+    },
+    "inbox-pattern": {
+      "sim": "clickFlow",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-dist-patterns",
+      "title": "Inbox / Idempotent Consumer"
+    },
+    "cdc-relay": {
+      "sim": "clickFlow",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-dist-patterns",
+      "title": "CDC Relay"
+    },
+    "sidecar": {
+      "sim": "none",
+      "figure": "outboxFlow",
+      "track": "lld",
+      "category": "lld-dist-patterns",
+      "title": "Sidecar"
+    },
+    "ambassador": {
+      "sim": "none",
+      "figure": "outboxFlow",
+      "track": "lld",
+      "category": "lld-dist-patterns",
+      "title": "Ambassador"
+    },
+    "saga-choreography": {
+      "sim": "clickFlow",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-dist-patterns",
+      "title": "Saga Choreography"
+    },
+    "saga-orchestration": {
+      "sim": "clickFlow",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-dist-patterns",
+      "title": "Saga Orchestration"
+    },
+    "cqrs-read-write-models": {
+      "sim": "clickFlow",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-dist-patterns",
+      "title": "CQRS Read/Write Models"
+    },
+    "event-sourcing-projection": {
+      "sim": "clickFlow",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-dist-patterns",
+      "title": "Event Sourcing Projection"
+    },
+    "claim-check": {
+      "sim": "none",
+      "figure": "outboxFlow",
+      "track": "lld",
+      "category": "lld-dist-patterns",
+      "title": "Claim Check"
+    },
+    "process-manager": {
+      "sim": "clickFlow",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-dist-patterns",
+      "title": "Process Manager"
+    },
+    "wire-tap": {
+      "sim": "none",
+      "figure": "outboxFlow",
+      "track": "lld",
+      "category": "lld-dist-patterns",
+      "title": "Wire Tap"
+    },
+    "content-enricher": {
+      "sim": "none",
+      "figure": "outboxFlow",
+      "track": "lld",
+      "category": "lld-dist-patterns",
+      "title": "Content Enricher"
+    },
+    "message-router": {
+      "sim": "none",
+      "figure": "outboxFlow",
+      "track": "lld",
+      "category": "lld-dist-patterns",
+      "title": "Message Router"
+    },
+    "splitter-aggregator": {
+      "sim": "none",
+      "figure": "outboxFlow",
+      "track": "lld",
+      "category": "lld-dist-patterns",
+      "title": "Splitter / Aggregator"
+    },
+    "competing-consumers": {
+      "sim": "clickFlow",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-dist-patterns",
+      "title": "Competing Consumers"
+    },
+    "priority-queue-consumer": {
+      "sim": "none",
+      "figure": "outboxFlow",
+      "track": "lld",
+      "category": "lld-dist-patterns",
+      "title": "Priority Queue Consumer"
+    },
+    "strangler-code-level": {
+      "sim": "none",
+      "figure": "outboxFlow",
+      "track": "lld",
+      "category": "lld-dist-patterns",
+      "title": "Strangler at Code Level"
+    },
+    "fire-and-forget": {
+      "sim": "none",
+      "figure": "messagingLoop",
+      "track": "lld",
+      "category": "lld-async",
+      "title": "Fire-and-Forget"
+    },
+    "request-reply": {
+      "sim": "none",
+      "figure": "messagingLoop",
+      "track": "lld",
+      "category": "lld-async",
+      "title": "Request-Reply"
+    },
+    "pub-sub-pattern": {
+      "sim": "queue",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-async",
+      "title": "Pub/Sub"
+    },
+    "point-to-point": {
+      "sim": "none",
+      "figure": "messagingLoop",
+      "track": "lld",
+      "category": "lld-async",
+      "title": "Point-to-Point"
+    },
+    "work-queue": {
+      "sim": "queue",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-async",
+      "title": "Work Queue"
+    },
+    "delayed-scheduled-messages": {
+      "sim": "none",
+      "figure": "messagingLoop",
+      "track": "lld",
+      "category": "lld-async",
+      "title": "Delayed / Scheduled Messages"
+    },
+    "dead-letter-pattern": {
+      "sim": "queue",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-async",
+      "title": "Dead Letter Pattern"
+    },
+    "backpressure-pattern": {
+      "sim": "queue",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-async",
+      "title": "Backpressure Pattern"
+    },
+    "outbox-inbox-combo": {
+      "sim": "queue",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-async",
+      "title": "Outbox + Inbox Combo"
+    },
+    "event-notification-vs-ecst": {
+      "sim": "none",
+      "figure": "messagingLoop",
+      "track": "lld",
+      "category": "lld-async",
+      "title": "Event Notification vs ECST"
+    },
+    "rest-resource-modeling": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "lld",
+      "category": "lld-api",
+      "title": "REST Resource Modeling"
+    },
+    "api-versioning-strategies": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "lld",
+      "category": "lld-api",
+      "title": "API Versioning Strategies"
+    },
+    "pagination-offset-cursor": {
+      "sim": "clickFlow",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-api",
+      "title": "Pagination (Offset vs Cursor)"
+    },
+    "error-contract-design": {
+      "sim": "none",
+      "figure": "requestFlow",
+      "track": "lld",
+      "category": "lld-api",
+      "title": "Error Contract Design"
+    },
+    "correlation-trace-ids": {
+      "sim": "clickFlow",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-api",
+      "title": "Correlation / Trace IDs"
+    },
+    "api-idempotency": {
+      "sim": "clickFlow",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-api",
+      "title": "API Idempotency"
+    },
+    "contract-first-vs-code-first": {
+      "sim": "none",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-api",
+      "title": "Contract-First vs Code-First"
+    },
+    "hateoas": {
+      "sim": "none",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-api",
+      "title": "HATEOAS"
+    },
+    "grpc-service-design": {
+      "sim": "none",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-api",
+      "title": "gRPC Service Design"
+    },
+    "graphql-schema-design": {
+      "sim": "none",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-api",
+      "title": "GraphQL Schema Design"
+    },
+    "er-modeling": {
+      "sim": "none",
+      "figure": "er",
+      "track": "lld",
+      "category": "lld-db",
+      "title": "ER Modeling"
+    },
+    "normal-forms-bcnf": {
+      "sim": "none",
+      "figure": "er",
+      "track": "lld",
+      "category": "lld-db",
+      "title": "1NF–3NF / BCNF"
+    },
+    "denormalization-patterns": {
+      "sim": "none",
+      "figure": "er",
+      "track": "lld",
+      "category": "lld-db",
+      "title": "Denormalization Patterns"
+    },
+    "primary-foreign-keys": {
+      "sim": "none",
+      "figure": "er",
+      "track": "lld",
+      "category": "lld-db",
+      "title": "Primary / Foreign Keys"
+    },
+    "indexing-strategies": {
+      "sim": "algorithm",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-db",
+      "title": "Indexing Strategies"
+    },
+    "soft-delete": {
+      "sim": "none",
+      "figure": "er",
+      "track": "lld",
+      "category": "lld-db",
+      "title": "Soft Delete"
+    },
+    "audit-tables": {
+      "sim": "none",
+      "figure": "er",
+      "track": "lld",
+      "category": "lld-db",
+      "title": "Audit Tables"
+    },
+    "optimistic-locking-schema": {
+      "sim": "none",
+      "figure": "er",
+      "track": "lld",
+      "category": "lld-db",
+      "title": "Optimistic Locking Schema"
+    },
+    "multi-tenant-schema": {
+      "sim": "none",
+      "figure": "er",
+      "track": "lld",
+      "category": "lld-db",
+      "title": "Multi-Tenant Schema"
+    },
+    "temporal-tables": {
+      "sim": "none",
+      "figure": "er",
+      "track": "lld",
+      "category": "lld-db",
+      "title": "Temporal Tables"
+    },
+    "scd-type-1-2": {
+      "sim": "none",
+      "figure": "er",
+      "track": "lld",
+      "category": "lld-db",
+      "title": "SCD Type 1 / 2"
+    },
+    "read-replica-routing": {
+      "sim": "clickFlow",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-db",
+      "title": "Read Replica Routing"
+    },
+    "connection-pooling": {
+      "sim": "metrics",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-db",
+      "title": "Connection Pooling"
+    },
+    "transactional-boundaries": {
+      "sim": "none",
+      "figure": "er",
+      "track": "lld",
+      "category": "lld-db",
+      "title": "Transactional Boundaries"
+    },
+    "threads-vs-async": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "lld",
+      "category": "lld-concurrency",
+      "title": "Threads vs Async"
+    },
+    "thread-pool": {
+      "sim": "architecture",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-concurrency",
+      "title": "Thread Pool"
+    },
+    "producer-consumer": {
+      "sim": "architecture",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-concurrency",
+      "title": "Producer-Consumer"
+    },
+    "readers-writers": {
+      "sim": "architecture",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-concurrency",
+      "title": "Readers-Writers"
+    },
+    "lock-free-atomic": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "lld",
+      "category": "lld-concurrency",
+      "title": "Lock-Free / Atomic"
+    },
+    "actor-model": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "lld",
+      "category": "lld-concurrency",
+      "title": "Actor Model"
+    },
+    "reactive-streams": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "lld",
+      "category": "lld-concurrency",
+      "title": "Reactive Streams"
+    },
+    "async-await-pitfalls": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "lld",
+      "category": "lld-concurrency",
+      "title": "Async/Await Pitfalls"
+    },
+    "virtual-threads": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "lld",
+      "category": "lld-concurrency",
+      "title": "Virtual Threads"
+    },
+    "structured-concurrency": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "lld",
+      "category": "lld-concurrency",
+      "title": "Structured Concurrency"
+    },
+    "layered-architecture": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "lld",
+      "category": "lld-ddd",
+      "title": "Layered Architecture"
+    },
+    "hexagonal-ports-adapters": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "lld",
+      "category": "lld-ddd",
+      "title": "Hexagonal Ports & Adapters"
+    },
+    "bounded-context": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "lld",
+      "category": "lld-ddd",
+      "title": "Bounded Context"
+    },
+    "aggregate-root": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "lld",
+      "category": "lld-ddd",
+      "title": "Aggregate Root"
+    },
+    "domain-vs-integration-events": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "lld",
+      "category": "lld-ddd",
+      "title": "Domain vs Integration Events"
+    },
+    "repository-pattern": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "lld",
+      "category": "lld-ddd",
+      "title": "Repository Pattern"
+    },
+    "value-objects": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "lld",
+      "category": "lld-ddd",
+      "title": "Value Objects"
+    },
+    "anti-corruption-code-boundary": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "lld",
+      "category": "lld-ddd",
+      "title": "Anti-Corruption at Code"
+    },
+    "cqrs-handler-separation": {
+      "sim": "none",
+      "figure": "architecture",
+      "track": "lld",
+      "category": "lld-ddd",
+      "title": "CQRS Handler Separation"
+    },
+    "event-storming-to-code": {
+      "sim": "none",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-ddd",
+      "title": "Event Storming to Code"
+    },
+    "unit-integration-contract": {
+      "sim": "none",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-testing",
+      "title": "Unit vs Integration vs Contract"
+    },
+    "test-doubles": {
+      "sim": "none",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-testing",
+      "title": "Test Doubles"
+    },
+    "tdd-for-lld": {
+      "sim": "none",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-testing",
+      "title": "TDD for LLD"
+    },
+    "property-based-testing": {
+      "sim": "none",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-testing",
+      "title": "Property-Based Testing"
+    },
+    "consumer-driven-contracts": {
+      "sim": "none",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-testing",
+      "title": "Consumer-Driven Contracts"
+    },
+    "mutation-testing": {
+      "sim": "none",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-testing",
+      "title": "Mutation Testing"
+    },
+    "parking-lot": {
+      "sim": "algorithm",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-classics",
+      "title": "Parking Lot"
+    },
+    "elevator": {
+      "sim": "algorithm",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-classics",
+      "title": "Elevator"
+    },
+    "lru-cache": {
+      "sim": "algorithm",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-classics",
+      "title": "LRU Cache",
+      "priority": "gold"
+    },
+    "in-memory-pub-sub": {
+      "sim": "algorithm",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-classics",
+      "title": "In-Memory Pub-Sub"
+    },
+    "rate-limiter-in-process": {
+      "sim": "algorithm",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-classics",
+      "title": "Rate Limiter (In-Process)"
+    },
+    "acid": {
+      "sim": "state",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-transactions",
+      "title": "ACID"
+    },
+    "isolation-levels": {
+      "sim": "state",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-transactions",
+      "title": "Isolation Levels"
+    },
+    "two-pc": {
+      "sim": "state",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-transactions",
+      "title": "2PC"
+    },
+    "three-pc": {
+      "sim": "state",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-transactions",
+      "title": "3PC"
+    },
+    "saga": {
+      "sim": "state",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-transactions",
+      "title": "Saga Pattern"
+    },
+    "tcc": {
+      "sim": "state",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-transactions",
+      "title": "TCC"
+    },
+    "state-transition": {
+      "sim": "state",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-transactions",
+      "title": "A→B→C State Transition"
+    },
+    "redis-lock": {
+      "sim": "race",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-dist-locks",
+      "title": "Redis Lock"
+    },
+    "redlock": {
+      "sim": "race",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-dist-locks",
+      "title": "Redlock Debate"
+    },
+    "zookeeper-lock": {
+      "sim": "race",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-dist-locks",
+      "title": "ZooKeeper Locks"
+    },
+    "etcd-lease": {
+      "sim": "race",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-dist-locks",
+      "title": "etcd Lease Locks"
+    },
+    "lease-expiration": {
+      "sim": "race",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-dist-locks",
+      "title": "Lease Expiration"
+    },
+    "fencing-tokens": {
+      "sim": "race",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-dist-locks",
+      "title": "Fencing Tokens"
+    },
+    "out-of-order": {
+      "sim": "algorithm",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-event-ordering",
+      "title": "Out-of-order Events"
+    },
+    "duplicate-events": {
+      "sim": "algorithm",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-event-ordering",
+      "title": "Duplicate Events"
+    },
+    "missing-events": {
+      "sim": "algorithm",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-event-ordering",
+      "title": "Missing Events"
+    },
+    "event-reordering": {
+      "sim": "algorithm",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-event-ordering",
+      "title": "Event Reordering"
+    },
+    "clock-skew": {
+      "sim": "algorithm",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-event-ordering",
+      "title": "Clock Skew"
+    },
+    "lamport-clock": {
+      "sim": "algorithm",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-event-ordering",
+      "title": "Lamport Clock"
+    },
+    "vector-clock": {
+      "sim": "algorithm",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-event-ordering",
+      "title": "Vector Clock"
+    },
+    "idempotency-key": {
+      "sim": "race",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-idempotency",
+      "title": "Idempotency-Key"
+    },
+    "exactly-once": {
+      "sim": "race",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-idempotency",
+      "title": "Exactly Once"
+    },
+    "deduplication": {
+      "sim": "race",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-idempotency",
+      "title": "Deduplication"
+    },
+    "optimistic": {
+      "sim": "state",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-concurrency-strategies",
+      "title": "Optimistic Concurrency"
+    },
+    "pessimistic": {
+      "sim": "state",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-concurrency-strategies",
+      "title": "Pessimistic Concurrency"
+    },
+    "hybrid": {
+      "sim": "state",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-concurrency-strategies",
+      "title": "Hybrid Locking"
+    }
+  }
+}

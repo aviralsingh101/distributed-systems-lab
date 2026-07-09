@@ -1,6 +1,7 @@
 // @article-v2
-import { mountSimulation } from "../../../sim/controls.js";
+// @sim-lab
 import { C, phaseOf } from "../../../sim/primitives.js";
+import { createTopicSim } from "../../../sim/lab/registry.js";
 
 export const meta = { id: "cache-stampede", title: "Cache Stampede", category: "retry" };
 
@@ -35,67 +36,11 @@ export const content = {
 <p>Interview tip: whiteboard the charge flow, mark where <b>Cache Stampede</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
   ],
   figures: [
-    { id: "retry-amplify", svg: `<svg viewBox="0 0 420 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Retry storm">
-<rect x="30" y="20" width="50" height="24" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="55" y="36" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">C1</text><rect x="30" y="50" width="50" height="24" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="55" y="66" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">C2</text><rect x="30" y="80" width="50" height="24" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="55" y="96" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">C3</text>
-<rect x="150" y="45" width="80" height="40" rx="6" fill="#1a2236" stroke="#ff5c6c" stroke-width="1.5"/>
-<text x="190" y="59" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">API</text><text x="190" y="79" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">slow</text>
-<rect x="280" y="20" width="50" height="24" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="305" y="36" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">retry</text><rect x="280" y="50" width="50" height="24" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="305" y="66" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">retry</text><rect x="280" y="80" width="50" height="24" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="305" y="96" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">retry</text>
-<rect x="360" y="45" width="50" height="40" rx="6" fill="#1a2236" stroke="#ff5c6c" stroke-width="1.5"/>
-<text x="385" y="59" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">DB</text><text x="385" y="79" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">overload</text>
-<text x="210" y="18" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">retries amplify load × N clients</text>
-</svg>`, caption: `Retry storm: each client retries a slow service, multiplying load on an already degraded backend.` },
-    { id: "request-path", svg: `<svg viewBox="0 0 640 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Cache Stampede in request path">
-<defs><marker id="fig-cache-stampede-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="10" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="46" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Client</text>
-<rect x="100" y="40" width="88" height="36" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="144" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Cache Stampede</text><text x="144" y="72" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">this topic</text>
-<rect x="206" y="40" width="80" height="36" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
-<text x="246" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Order</text>
-<rect x="304" y="40" width="84" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="346" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Gateway</text>
-<rect x="406" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="442" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger</text>
-<rect x="496" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="532" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Queue</text>
-<line x1="82" y1="58" x2="98" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-cache-stampede-arr)"/>
-<line x1="188" y1="58" x2="204" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-cache-stampede-arr)"/>
-<line x1="286" y1="58" x2="302" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-cache-stampede-arr)"/>
-<line x1="388" y1="58" x2="404" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-cache-stampede-arr)"/>
-<line x1="478" y1="58" x2="494" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-cache-stampede-arr)"/>
-<text x="320" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">HTTPS request flow — Cache Stampede</text>
-</svg>`, caption: `Cache Stampede on the payment request path — from client charge to Ledger commit.` }
+    { id: "cache-flow", svg: `<svg viewBox="0 0 520 140" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Cache Stampede cache"> <defs><marker id="fig-cache-stampede-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs> <rect x="20" y="50" width="70" height="36" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/> <text x="55" y="72" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">App</text> <rect x="130" y="50" width="80" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/> <text x="170" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Cache</text><text x="170" y="78" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">lock</text> <rect x="250" y="50" width="70" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/> <text x="285" y="72" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">DB</text> <rect x="360" y="30" width="130" height="32" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/> <text x="425" y="50" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">single-flight</text> <rect x="360" y="78" width="130" height="32" rx="6" fill="#1a2236" stroke="#ff5c6c" stroke-width="1.5"/> <text x="425" y="98" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">thundering herd</text> <line x1="90" y1="68" x2="128" y2="68" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-cache-stampede-arr)"/> <line x1="210" y1="68" x2="248" y2="68" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-cache-stampede-arr)"/> <line x1="130" y1="40" x2="358" y2="46" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-cache-stampede-arr)"/> <line x1="210" y1="90" x2="358" y2="94" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-cache-stampede-arr)"/> </svg>`, caption: `Cache Stampede: thundering herd vs single-flight — app, cache, and database interaction.` },
   ],
   related: ["cache-aside", "cache-invalidation", "negative-cache"],
 };
 
 export function createSimulation(stage, panel, stageEl) {
-  return mountSimulation(stage, panel, stageEl, {
-    note: "Expiry triggers expensive recompute.",
-    toggles: [{ key: "fix", label: "Stale-while-revalidate + coalesce", kind: "ok", value: false }],
-    frame(ctx, t) {
-      const d = ctx.d; const fix = ctx.toggles.fix;
-      const cache = { x: 500, y: 120 }, calc = { x: 500, y: 430 };
-      const ph = phaseOf(t, [1.4, 1.9, 1.5]);
-      const expired = ph.i >= 1;
-      d.node(cache.x - 100, cache.y - 34, 200, 68, { title: "Cache: daily total", color: C.queue, state: expired ? (fix ? "warn" : "err") : "ok", active: true, value: expired ? (fix ? "stale (serving)" : "EXPIRED") : "fresh" });
-      d.node(calc.x - 100, calc.y - 34, 200, 68, { title: "expensive compute", color: C.gateway, active: true });
-
-      const N = 8; let runs = 0;
-      for (let i = 0; i < N; i++) {
-        const rx = 130 + i * 100, ry = 275;
-        d.node(rx - 24, ry - 16, 48, 32, { title: "req", color: C.service });
-        if (expired && ph.i === 1 && !fix) { const pos = d.along(rx, ry, calc.x, calc.y - 34, ph.p); d.token(pos.x, pos.y, { r: 7, color: C.err }); runs++; }
-        else if (fix) { const pos = d.along(rx, ry, cache.x, cache.y + 34, ph.p); d.token(pos.x, pos.y, { r: 7, color: C.ok }); }
-      }
-      if (fix && expired) { const pos = d.along(cache.x + 110, cache.y, calc.x, calc.y - 34, (t % 2) / 2); d.token(pos.x, pos.y, { r: 8, color: C.warn, label: "bg refresh" }); runs = 1; }
-      ctx.setStatus(fix ? "1 background recompute; readers served stale" : (expired && ph.i === 1 ? N + " parallel recomputes — stampede" : "cache fresh"), fix ? "ok" : (expired && ph.i === 1 ? "err" : ""));
-    },
-  });
+  return createTopicSim("cache-stampede", stage, panel, stageEl);
 }

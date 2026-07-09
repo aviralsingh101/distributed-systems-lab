@@ -1,7 +1,20 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { layerTemplate } from "../../../sim/templates/index.js";
+
+const TXB_SVG = `<svg viewBox="0 0 640 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="A transaction boundary wrapping local writes, with the external gateway call kept outside">
+  <rect x="30" y="45" width="330" height="120" rx="8" fill="none" stroke="#3ddc97" stroke-width="1.6" stroke-dasharray="6 4"/>
+  <text x="195" y="38" text-anchor="middle" fill="#3ddc97" font-size="11" font-family="system-ui">BEGIN … COMMIT (one unit of work)</text>
+  <rect x="50" y="70" width="130" height="30" rx="5" fill="#1a2236" stroke="#5b9dff" stroke-width="1.3"/>
+  <text x="115" y="90" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="ui-monospace,monospace">debit wallet</text>
+  <rect x="50" y="115" width="130" height="30" rx="5" fill="#1a2236" stroke="#5b9dff" stroke-width="1.3"/>
+  <text x="115" y="135" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="ui-monospace,monospace">insert ledger</text>
+  <rect x="210" y="92" width="130" height="30" rx="5" fill="#1a2236" stroke="#7c5cff" stroke-width="1.3"/>
+  <text x="275" y="112" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="ui-monospace,monospace">insert outbox</text>
+  <rect x="430" y="92" width="170" height="34" rx="6" fill="#1a2236" stroke="#ff6b6b" stroke-width="1.5"/>
+  <text x="515" y="107" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="ui-monospace,monospace">Gateway HTTP call</text>
+  <text x="515" y="120" text-anchor="middle" fill="#ff6b6b" font-size="9" font-family="system-ui">OUTSIDE the txn</text>
+  <text x="395" y="160" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Local writes commit atomically; slow/uncertain external work stays outside the lock window.</text>
+</svg>`;
 
 const topic = makeTopic({
   id: "transactional-boundaries",
@@ -10,68 +23,152 @@ const topic = makeTopic({
   track: "lld",
   tier: "essential",
   archetype: "pattern",
-  oneliner: `Where to start and commit units.`,
+  oneliner: `Deciding exactly where a transaction begins and commits — the unit of work that must be all-or-nothing, and everything that must stay outside it.`,
   sections: [
-    { title: `Motivation`, body: `<p>Where to start and commit units.</p>
-<p>Without <b>Transactional Boundaries</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>Distributed transactions split into local ACID commits plus compensating actions. Outbox pattern atomically writes business row and event intent; saga orchestrator tracks forward steps and compensation handlers per failed step.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Transactional Boundaries</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Transactional Boundaries</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Transactional Boundaries</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Transactional Boundaries</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+    { title: `What a boundary is`, body: `<p>A <b>transactional boundary</b> is the scope enclosed by <code>BEGIN</code> and <code>COMMIT</code>: the set of writes that must succeed or fail together. This is the <b>Unit of Work</b> — a single business operation whose invariants must hold atomically. Getting the boundary right is the difference between a system that is consistent by construction and one that leaks half-applied state: money debited but no ledger entry, an order marked paid with no payment recorded.</p>
+<p>The guiding principle: the boundary should wrap <em>exactly</em> the writes that share an invariant, and no more. Too small and you split an atomic operation into corruptible pieces; too large and you hold locks and connections across slow work.</p>
+<pre>@Entity
+@Table(name = "wallets")
+public class Wallet {
+
+    @Id
+    private String id;
+
+    @Column(name = "balance_minor", nullable = false)
+    private long balanceMinor;
+
+    @Version
+    @Column(name = "version", nullable = false)
+    private int version;
+}
+
+@Entity
+@Table(name = "ledger_entries")
+public class LedgerEntry {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(name = "wallet_id", nullable = false)
+    private String walletId;
+
+    @Column(name = "amount_minor", nullable = false)
+    private long amountMinor;
+
+    @Column(name = "payment_id")
+    private String paymentId;
+}</pre>` },
+    { title: `One boundary per use case`, body: `<p>Put the boundary at the <b>application/use-case layer</b> — one transaction per business operation — not sprinkled inside repositories. If each repository call opened its own transaction, debiting the wallet and inserting the ledger row would be two independent commits, and a crash between them would corrupt the balance. Instead the service method opens one transaction and both writes commit as a unit. Implement the flow so the boundary lives in one place:</p>
+<p><code>BEGIN; UPDATE wallet SET balance = balance - :amt WHERE id = :w AND balance &gt;= :amt; INSERT INTO ledger_entry(wallet_id, amount) VALUES (:w, -:amt); COMMIT;</code></p>
+<p>The HTTP handler stays thin; the domain service owns the boundary; repositories just run statements inside whatever transaction is active.</p>
+<pre>@Service
+public class WalletDebitService {
+
+    private final WalletRepository walletRepository;
+    private final LedgerEntryRepository ledgerRepository;
+    private final OutboxRepository outboxRepository;
+
+    // One @Transactional boundary per business operation
+    @Transactional
+    public void debitWallet(String walletId, long amountMinor, String paymentId) {
+        Wallet wallet = walletRepository.findByIdForUpdate(walletId)
+            .orElseThrow(() -&gt; new WalletNotFoundException(walletId));
+
+        if (wallet.getBalanceMinor() &lt; amountMinor) {
+            throw new InsufficientFundsException(walletId);
+        }
+
+        wallet.setBalanceMinor(wallet.getBalanceMinor() - amountMinor);
+        walletRepository.save(wallet);
+
+        ledgerRepository.save(new LedgerEntry(walletId, -amountMinor, paymentId));
+
+        // Outbox row in same transaction — publish intent after commit
+        outboxRepository.save(OutboxEvent.walletDebited(walletId, amountMinor));
+    }
+}</pre>` },
+    { title: `Keep external calls outside`, figureAfter: "txn-boundary", body: `<p>The most damaging anti-pattern is holding a transaction open across a slow or unreliable external call — a payment Gateway HTTP request, a queue publish, a third-party API. Locks and a pooled connection are held for the entire round trip, so one slow dependency drains the connection pool and blocks unrelated writers.</p>
+<p>Keep I/O outside the boundary. Do validation and any external reads <em>before</em> <code>BEGIN</code>; do the external <em>write</em> after <code>COMMIT</code>, made reliable with the <b>transactional outbox</b>: inside the transaction you insert an outbox row describing the event, and a separate relay publishes it after commit. That way the DB commit and the intent to publish are atomic, but the network call is not inside the lock.</p>
+<pre>@Service
+public class PaymentCaptureService {
+
+    private final PaymentGateway paymentGateway;
+    private final PaymentRepository paymentRepository;
+    private final OutboxRelay outboxRelay;
+
+    public PaymentResponse capture(String paymentId) {
+        // Phase 1: external call OUTSIDE any DB transaction
+        ChargeResult gatewayResult = paymentGateway.capture(paymentId);
+
+        // Phase 2: local writes in one short transaction
+        Payment payment = recordCapture(paymentId, gatewayResult);
+
+        // Phase 3: relay publishes outbox events (also outside txn)
+        outboxRelay.dispatchPending();
+        return toResponse(payment);
+    }
+
+    @Transactional
+    protected Payment recordCapture(String paymentId, ChargeResult result) {
+        Payment payment = paymentRepository.findById(paymentId)
+            .orElseThrow(() -&gt; new PaymentNotFoundException(paymentId));
+        payment.markCaptured(result.processorRef());
+        ledgerRepository.recordCredit(payment.getWalletId(), payment.getAmountMinor());
+        outboxRepository.save(OutboxEvent.paymentCaptured(paymentId));
+        return paymentRepository.save(payment);
+    }
+}</pre>` },
+    { title: `Boundaries and isolation`, body: `<p>The boundary is also where <b>isolation level</b> applies. Within it, <code>READ COMMITTED</code> (the common default) prevents dirty reads but allows non-repeatable reads; <code>REPEATABLE READ</code> / <code>SERIALIZABLE</code> add stronger guarantees at the cost of more aborts. For a read-modify-write on the same row (a balance check then debit), either widen isolation, take an explicit lock (<code>SELECT ... FOR UPDATE</code>), or use an optimistic version check — the boundary alone does not stop concurrent writers unless the isolation level or an explicit lock does.</p>
+<pre>@Repository
+public interface WalletRepository extends JpaRepository&lt;Wallet, String&gt; {
+
+    // Pessimistic lock within the @Transactional boundary
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT w FROM Wallet w WHERE w.id = :id")
+    Optional&lt;Wallet&gt; findByIdForUpdate(@Param("id") String id);
+}
+
+@Service
+public class WalletTransferService {
+
+    // Stronger isolation for multi-row transfer
+    @Transactional(isolation = Isolation.REPEATABLE_READ)
+    public void transfer(String fromId, String toId, long amountMinor) {
+        Wallet from = walletRepository.findByIdForUpdate(fromId).orElseThrow();
+        Wallet to = walletRepository.findByIdForUpdate(toId).orElseThrow();
+        from.debit(amountMinor);
+        to.credit(amountMinor);
+        walletRepository.saveAll(List.of(from, to));
+    }
+}</pre>` },
+    { title: `Guidelines`, body: `<p>Keep transactions <b>short</b> — enter with data ready, do the writes, commit, get out — because long transactions hold locks, bloat MVCC versions, and starve the pool. Make the operation <b>idempotent</b> (an idempotency key) so a client retry after an ambiguous commit does not double-apply. Prefer <b>one</b> local transaction over a distributed one: if an operation spans services, model it as a <b>saga</b> of local transactions with compensations rather than a lock held across the network. Match the boundary to the business invariant, and everything else follows.</p>
+<pre>// Propagation: nested calls join the outer boundary, don't fork
+@Service
+public class OrderPlacementService {
+
+    @Transactional
+    public Order placeOrder(PlaceOrderCommand cmd) {
+        Order order = orderRepository.save(Order.create(cmd));
+        walletDebitService.debitWallet(   // joins existing transaction
+            cmd.walletId(), order.totalMinor(), order.paymentId());
+        return order;
+    }
+}
+
+// readOnly=true — no writes, can route to replica safely
+@Transactional(readOnly = true)
+public WalletBalance getBalance(String walletId) {
+    return walletRepository.findById(walletId)
+        .map(w -&gt; new WalletBalance(w.getId(), w.getBalanceMinor()))
+        .orElseThrow(() -&gt; new WalletNotFoundException(walletId));
+}</pre>` },
   ],
   figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Transactional Boundaries structure">
-<defs><marker id="fig-transactional-boundaries-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Transactional B…</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-transactional-boundaries-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-transactional-boundaries-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-transactional-boundaries-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Transactional Boundaries — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Transactional Boundaries pattern — components and data flow in Order Service.` }
+    { id: "txn-boundary", svg: TXB_SVG, caption: "The unit of work commits wallet, ledger, and outbox writes atomically; the external Gateway call is deliberately outside the transaction." },
   ],
-  related: [],
-  
-  
-  template: "layer",
-  sim: () => ({
-    note: `Explore Transactional Boundaries in the payment platform.`,
-    toggles: [{ key: "fix", label: "Apply layering", kind: "ok", value: false }],
-    layers: (ctx) => [
-      { name: "API", components: [{ title: "REST/gRPC", active: true }] },
-      { name: "Domain", components: [{ title: "Transactional Boundaries", active: ctx.toggles.fix, color: C.accent }] },
-      { name: "Data", components: [{ title: "Ledger", color: C.ledger }, { title: "Queue", color: C.queue }] },
-    ],
-    status: (ctx) => ({ text: ctx.toggles.fix ? "clean separation" : "logic leaks across layers", cls: ctx.toggles.fix ? "ok" : "err" }),
-  }),
+  related: ["connection-pooling", "optimistic-locking-schema", "read-replica-routing", "audit-tables"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

@@ -1,7 +1,5 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { layerTemplate } from "../../../sim/templates/index.js";
 
 const topic = makeTopic({
   id: "dry-principle",
@@ -9,69 +7,64 @@ const topic = makeTopic({
   category: "lld-oop",
   track: "lld",
   tier: "essential",
-  archetype: "pattern",
-  oneliner: `Don't repeat yourself.`,
+  archetype: "concept",
+  oneliner: `Every piece of knowledge should have a single, authoritative representation in the system — duplicate knowledge, not just duplicate text, is the enemy.`,
   sections: [
-    { title: `Motivation`, body: `<p>Don't repeat yourself.</p>
-<p>Without <b>DRY</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>DRY</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>DRY</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>DRY</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>DRY</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>DRY</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+    { title: `What DRY actually says`, body: `<p><b>DRY</b> — Don't Repeat Yourself, from Hunt and Thomas's <em>The Pragmatic Programmer</em> — states that <em>every piece of knowledge must have a single, unambiguous, authoritative representation within a system</em>. The important word is <b>knowledge</b>. DRY is about duplicated <em>decisions and rules</em>, not merely lines of text that happen to look alike.</p>
+<p>When one business rule — say, how a settlement fee is computed — lives in three places, a change requires finding and editing all three. Miss one and the system becomes inconsistent. Centralizing that rule means the change is made once and applied everywhere.</p>` },
+    { title: `How it works — violation vs fix`, body: `<p>You apply DRY by locating each piece of knowledge and giving it one home: a function for a shared algorithm, a constant for a magic value, a single schema or type as the source of truth. Then every consumer references that one definition rather than restating it.</p>
+<pre>// VIOLATION: fee formula duplicated in three places
+public class CheckoutHandler {
+    public int totalWithFee(Order order) {
+        int fee = (int) (order.totalCents() * 0.029);  // duplicated knowledge
+        return order.totalCents() + fee;
+    }
+}
+
+public class RefundService {
+    public int feeOnRefund(Order order) {
+        return (int) (order.totalCents() * 0.029);  // same formula, copy-pasted
+    }
+}
+
+public class NightlyReport {
+    public int settlementFee(Order order) {
+        return (int) (order.totalCents() * 0.029);  // third copy — drift risk
+    }
+}</pre>
+<p>Centralize the knowledge in one authoritative place:</p>
+<pre>public final class SettlementFeeCalculator {
+    private static final double CARD_FEE_RATE = 0.029;
+
+    public int computeFee(int totalCents) {
+        return (int) (totalCents * CARD_FEE_RATE);
+    }
+}
+
+// All three callers reference the single source of truth
+public class CheckoutHandler {
+    private final SettlementFeeCalculator feeCalc;
+    public int totalWithFee(Order order) {
+        return order.totalCents() + feeCalc.computeFee(order.totalCents());
+    }
+}</pre>
+<p>Now a regulatory change to the fee formula is a one-line edit in <code>SettlementFeeCalculator</code> with no risk of drift between checkout, refund, and reporting paths.</p>` },
+    { title: `The false-positive trap`, body: `<p>The subtle failure of DRY is <b>coincidental duplication</b> — two snippets that look identical today but represent <em>different</em> knowledge that will evolve independently. Merging them couples unrelated concepts: a change demanded by one caller is forced onto the other.</p>
+<pre>// These LOOK identical but encode DIFFERENT knowledge
+public int maxRetriesForPayment() { return 3; }   // gateway SLA policy
+public int maxRetriesForEmail()    { return 3; }   // email provider policy
+
+// WRONG: merge because "both return 3"
+public int maxRetries() { return 3; }  // now payment and email MUST change together
+
+// RIGHT: keep separate — they will diverge when policies differ
+public int maxPaymentRetries() { return 3; }
+public int maxEmailRetries()    { return 3; }</pre>
+<p>The test is not textual similarity but whether the two places encode the <em>same decision</em>. If they would always change together, unify them; if they merely resemble each other now, leave them apart.</p>` },
+    { title: `Balance and related ideas`, body: `<p>DRY trades a little indirection for consistency, and it pairs with the "Rule of Three": tolerate a duplication once or twice, and abstract when the third occurrence confirms the pattern is real. Over-eager DRY collides with KISS and YAGNI by inventing abstractions before the knowledge has stabilized. Applied to genuine shared knowledge, though, DRY is one of the highest-leverage habits for keeping a system correct as it changes.</p>` },
   ],
-  figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="DRY structure">
-<defs><marker id="fig-dry-principle-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">DRY</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-dry-principle-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-dry-principle-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-dry-principle-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">DRY — class and integration boundaries</text>
-</svg>`, caption: `Structure of the DRY pattern — components and data flow in Order Service.` }
-  ],
-  related: [],
-  
-  
-  template: "layer",
-  sim: () => ({
-    note: `Explore DRY in the payment platform.`,
-    toggles: [{ key: "fix", label: "Apply layering", kind: "ok", value: false }],
-    layers: (ctx) => [
-      { name: "API", components: [{ title: "REST/gRPC", active: true }] },
-      { name: "Domain", components: [{ title: "DRY", active: ctx.toggles.fix, color: C.accent }] },
-      { name: "Data", components: [{ title: "Ledger", color: C.ledger }, { title: "Queue", color: C.queue }] },
-    ],
-    status: (ctx) => ({ text: ctx.toggles.fix ? "clean separation" : "logic leaks across layers", cls: ctx.toggles.fix ? "ok" : "err" }),
-  }),
+  related: ["single-responsibility-principle", "kiss-yagni-principles", "open-closed-principle", "abstraction"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

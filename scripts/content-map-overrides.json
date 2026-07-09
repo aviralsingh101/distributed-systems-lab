@@ -1,0 +1,50 @@
+{
+  "proseOnly": [
+    "conways-law",
+    "requirements-gathering",
+    "technical-debt-vs-velocity",
+    "system-design-framework",
+    "non-functional-requirements",
+    "back-of-envelope-estimation",
+    "dry-principle",
+    "kiss-yagni-principles",
+    "interpreter",
+    "specification-pattern",
+    "module-pattern",
+    "event-storming-to-code",
+    "hateoas",
+    "contract-first-vs-code-first",
+    "graphql-schema-design",
+    "grpc-service-design",
+    "unit-integration-contract",
+    "test-doubles",
+    "tdd-for-lld",
+    "property-based-testing",
+    "consumer-driven-contracts",
+    "mutation-testing"
+  ],
+  "figureOnly": {
+    "sla-vs-slo": "comparison",
+    "qps-latency-storage-math": "comparison"
+  },
+  "hldRateLimitingStatic": ["cell-architecture", "gossip-protocols"],
+  "hldNetworkingInteractive": ["dns", "grpc", "websockets", "http-evolution"],
+  "hldTheoryInteractive": ["cap-theorem-framing", "pacelc", "quorum-reads-writes", "consensus-raft-paxos"],
+  "hldBlocksInteractive": ["api-gateway", "reverse-proxy", "load-balancer-l4-l7", "cdn", "service-mesh", "message-queues"],
+  "hldClassicsInteractive": ["url-shortener", "chat-system", "news-feed", "payment-system-hld", "rate-limiter-service", "ticket-booking"],
+  "lldDbInteractive": ["connection-pooling", "read-replica-routing", "indexing-strategies"],
+  "lldDbSimTypes": {
+    "connection-pooling": "metrics",
+    "read-replica-routing": "clickFlow",
+    "indexing-strategies": "algorithm"
+  },
+  "lldDistPatternsInteractive": [
+    "saga-choreography", "saga-orchestration", "transactional-outbox", "inbox-pattern",
+    "cqrs-read-write-models", "event-sourcing-projection", "cdc-relay", "competing-consumers", "process-manager"
+  ],
+  "lldAsyncInteractive": ["dead-letter-pattern", "backpressure-pattern", "pub-sub-pattern", "work-queue", "outbox-inbox-combo"],
+  "lldConcurrencyInteractive": ["thread-pool", "producer-consumer", "readers-writers"],
+  "lldApiInteractive": ["pagination-offset-cursor", "api-idempotency", "correlation-trace-ids"],
+  "lldGoFInteractive": ["singleton", "observer", "strategy", "state"],
+  "goldFigureSim": ["lost-update", "toctou", "dns", "singleton", "circuit-breaker", "transactional-outbox"]
+}

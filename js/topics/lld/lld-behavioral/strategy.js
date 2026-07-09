@@ -1,7 +1,7 @@
 // @article-v2
+// @sim-lab
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { stateMachineTemplate } from "../../../sim/templates/index.js";
+import { createTopicSim } from "../../../sim/lab/registry.js";
 
 const topic = makeTopic({
   id: "strategy",
@@ -10,74 +10,84 @@ const topic = makeTopic({
   track: "lld",
   tier: "essential",
   archetype: "pattern",
-  oneliner: `Swap algorithms at runtime.`,
+  oneliner: `Encapsulate each member of a family of interchangeable algorithms behind one interface so the caller can swap them without changing its code.`,
   sections: [
-    { title: `Motivation`, body: `<p>Swap algorithms at runtime.</p>
-<p>Without <b>Strategy</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Strategy</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Strategy</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Strategy</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Strategy</b> changes to production:</p>
+    { title: `Intent`, body: `<p><b>Strategy</b> defines a family of algorithms, encapsulates each one behind a common interface, and makes them interchangeable. The algorithm can then vary independently of the client that uses it.</p>
+<p>The smell it removes is a growing conditional that selects behaviour. A payment router that picks a gateway with <code>if (mode === "cheapest") … else if (mode === "fastest") …</code> becomes harder to test and extend with every new rule. Strategy replaces that branch with an object you plug in.</p>
+<pre>// --- Strategy: interchangeable routing algorithms ---
+public interface RoutingStrategy {
+    PaymentGateway pick(List&lt;PaymentGateway&gt; gateways, Payment payment);
+}</pre>` },
+    { title: `Participants and structure`, body: `<p>Three roles:</p>
 <ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
+<li><b>Strategy</b> — the interface every algorithm implements, e.g. <code>RoutingStrategy.pick(gateways, payment)</code>.</li>
+<li><b>Concrete Strategies</b> — <code>CheapestRouting</code>, <code>FastestRouting</code>, <code>HighestSuccessRouting</code>. Each is a self-contained algorithm.</li>
+<li><b>Context</b> — <code>PaymentRouter</code>, which holds a Strategy reference and delegates the decision to it.</li>
 </ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Strategy</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<pre>public final class CheapestRouting implements RoutingStrategy {
+    @Override
+    public PaymentGateway pick(List&lt;PaymentGateway&gt; gateways, Payment payment) {
+        return gateways.stream()
+            .min(Comparator.comparing(g -&gt; g.feeFor(payment.amount())))
+            .orElseThrow();
+    }
+}
+
+public final class HighestSuccessRouting implements RoutingStrategy {
+    private final GatewayMetrics metrics;
+
+    public HighestSuccessRouting(GatewayMetrics metrics) { this.metrics = metrics; }
+
+    @Override
+    public PaymentGateway pick(List&lt;PaymentGateway&gt; gateways, Payment payment) {
+        return gateways.stream()
+            .max(Comparator.comparing(g -&gt; metrics.successRate(g.id())))
+            .orElseThrow();
+    }
+}</pre>
+<p>The strategies are independent of one another and unaware of the context's internals; the context simply forwards the call.</p>` },
+    { title: `Implementation flow`, body: `<p>Selection and execution are separated:</p>
+<ol>
+<li>Some policy chooses a strategy — from config, an experiment flag, or the merchant's tier: <code>router.setStrategy(new HighestSuccessRouting(metrics))</code>.</li>
+<li>The context delegates when work arrives: <code>router.route(payment)</code> calls <code>strategy.pick(...)</code>.</li>
+<li>Swapping behaviour is a one-line change of the injected strategy; adding a new algorithm means adding a class, not editing the context (open/closed).</li>
+</ol>
+<pre>// --- Context: delegates to the injected strategy ---
+public class PaymentRouter {
+    private RoutingStrategy strategy;
+
+    public PaymentRouter(RoutingStrategy strategy) {
+        this.strategy = strategy;
+    }
+
+    public void setStrategy(RoutingStrategy strategy) {
+        this.strategy = strategy;  // client chooses the algorithm
+    }
+
+    public ChargeResult route(Payment payment, List&lt;PaymentGateway&gt; gateways) {
+        PaymentGateway chosen = strategy.pick(gateways, payment);
+        return chosen.charge(payment.toChargeRequest());
+    }
+}</pre>
+<p>In Java, a strategy is often a functional interface — the pattern degenerates to passing a lambda, which is perfectly idiomatic.</p>` },
+    { title: `Strategy vs State`, body: `<p>Strategy and <b>State</b> share the same class diagram — a context delegating to a swappable object — but their intent is opposite:</p>
+<ul>
+<li><b>Strategy</b>: the <em>client</em> chooses which algorithm to inject; the choice is usually fixed for the operation; strategies never trigger each other. Answers "how should I do this?"</li>
+<li><b>State</b>: the object itself moves between states in response to events; states are aware of and cause transitions to one another. Answers "how do I behave now that I am in this mode?"</li>
+</ul>
+<pre>// Strategy: client injects — payment does NOT change its own algorithm
+router.setStrategy(new CheapestRouting());   // external choice
+
+// State: payment transitions itself — PENDING → CAPTURED → REFUNDED
+payment.capture();  // internal state object decides the next transition</pre>
+<p>Strategy's costs are the usual ones — more classes and the client needing to know the options — but it eliminates sprawling conditionals and makes each algorithm independently testable.</p>` },
   ],
-  figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Strategy structure">
-<defs><marker id="fig-strategy-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Strategy</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-strategy-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-strategy-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-strategy-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Strategy — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Strategy pattern — components and data flow in Order Service.` }
-  ],
-  related: [],
-  
-  
-  template: "stateMachine",
-  sim: () => ({
-    note: `Explore Strategy in the payment platform.`,
-    toggles: [{ key: "fix", label: "Valid transitions only", kind: "ok", value: false }],
-    states: (ctx) => [
-      { id: "pending", label: "Pending", x: 200, y: 280, color: C.service },
-      { id: "active", label: "Strategy", x: 500, y: 280, color: C.accent, good: true },
-      { id: "done", label: "Settled", x: 800, y: 280, color: C.ok, good: true },
-      { id: "bad", label: "Invalid", x: 500, y: 420, color: C.err, bad: true },
-    ],
-    currentState: (ctx, t) => {
-      if (!ctx.toggles.fix && (t % 6) > 4) return "bad";
-      return ["pending", "active", "done"][Math.floor((t * 0.35) % 3)];
-    },
-    transitions: [{ from: "pending", to: "active", label: "apply" }, { from: "active", to: "done", label: "commit" }],
-    status: (ctx) => ({ text: ctx.toggles.fix ? "state machine guards flow" : "illegal states possible", cls: ctx.toggles.fix ? "ok" : "err" }),
-  }),
+  related: ["state", "template-method", "command", "bridge", "specification-pattern"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
+
 export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
+  return createTopicSim("strategy", stage, panel, stageEl);
 }

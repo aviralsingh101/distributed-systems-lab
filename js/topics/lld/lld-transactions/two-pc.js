@@ -1,85 +1,59 @@
 // @article-v2
-import { sequenceSim } from "../../../sim/sequence.js";
-import { C } from "../../../sim/primitives.js";
+// @sim-lab
+import { createTopicSim } from "../../../sim/lab/registry.js";
 
 export const meta = { id: "two-pc", title: "Two-Phase Commit (2PC)", category: "transactions" };
 
+const FLOW_SVG = `<svg viewBox="0 0 720 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Two-phase commit message flow">
+  <defs><marker id="fig-two-pc-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
+  <rect x="290" y="12" width="140" height="34" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
+  <text x="360" y="33" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Coordinator</text>
+  <rect x="70" y="150" width="150" height="34" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
+  <text x="145" y="171" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger (RM 1)</text>
+  <rect x="500" y="150" width="150" height="34" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
+  <text x="575" y="171" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Wallet (RM 2)</text>
+  <text x="175" y="80" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Phase 1: PREPARE</text>
+  <text x="175" y="120" text-anchor="middle" fill="#3ddc97" font-size="10" font-family="system-ui">vote YES (in-doubt, locks held)</text>
+  <text x="560" y="80" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Phase 2: COMMIT</text>
+  <text x="560" y="120" text-anchor="middle" fill="#3ddc97" font-size="10" font-family="system-ui">ack + release locks</text>
+  <line x1="320" y1="46" x2="150" y2="148" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-two-pc-arr)"/>
+  <line x1="200" y1="150" x2="330" y2="48" stroke="#3ddc97" stroke-width="1.2" stroke-dasharray="3 3" marker-end="url(#fig-two-pc-arr)"/>
+  <line x1="400" y1="46" x2="570" y2="148" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-two-pc-arr)"/>
+  <line x1="520" y1="150" x2="390" y2="48" stroke="#3ddc97" stroke-width="1.2" stroke-dasharray="3 3" marker-end="url(#fig-two-pc-arr)"/>
+</svg>`;
+
 export const content = {
-  oneliner: `Prepare/commit; coordinator can block.`,
+  oneliner: `An atomic-commit protocol that makes several independent databases commit all-or-nothing — at the cost of blocking if the coordinator dies.`,
   archetype: "pattern",
-  sections: [
-    { title: `Motivation`, body: `<p>Prepare/commit; coordinator can block.</p>
-<p>Without <b>2PC</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>Distributed transactions split into local ACID commits plus compensating actions. Outbox pattern atomically writes business row and event intent; saga orchestrator tracks forward steps and compensation handlers per failed step.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>2PC</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>2PC</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>2PC</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>2PC</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
-  ],
   figures: [
-    { id: "2pc-phases", svg: `<svg viewBox="0 0 420 110" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="2PC">
-<rect x="30" y="38" width="90" height="36" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="75" y="60" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Coordinator</text>
-<rect x="160" y="25" width="70" height="30" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="195" y="44" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">DB A</text>
-<rect x="160" y="65" width="70" height="30" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="195" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">DB B</text>
-<text x="280" y="40" fill="#93a1bd" font-size="10" font-family="system-ui">1. PREPARE</text>
-<text x="280" y="75" fill="#93a1bd" font-size="10" font-family="system-ui">2. COMMIT</text>
-</svg>`, caption: `Two-phase commit: Prepare (vote) then Commit — coordinator blocks on failure.` }
+    { id: "2pc-flow", svg: FLOW_SVG, caption: "Coordinator drives a prepare round, then a commit round. Between its YES vote and the decision, each resource manager is in-doubt and holds locks." },
   ],
-  related: [],
+  sections: [
+    { title: `What problem 2PC solves`, body: `<p>A local transaction is atomic because one database controls one write-ahead log. The problem appears when a single logical operation must update <b>two or more independent resource managers</b> — say the Ledger debits a wallet in one database while an Inventory service reserves stock in another. Each can commit locally, but there is no shared log, so a crash between the two local commits leaves the system half-applied: money moved, stock not reserved.</p>
+<p><b>Two-Phase Commit (2PC)</b> is a distributed atomic-commit protocol that coordinates these independent participants so that either <em>all</em> of them commit or <em>all</em> of them abort. It is the classic implementation behind the XA / JTA standard used by application servers and distributed databases.</p>` },
+    { title: `Roles and structure`, body: `<p>There are two roles. The <b>coordinator</b> (transaction manager) drives the protocol and owns the final decision. The <b>participants</b> (resource managers — each a database or queue) do the actual work and vote. Both sides keep a durable write-ahead log so decisions survive a crash.</p>
+<p>The guarantee is <b>atomicity across participants</b>: the coordinator only decides COMMIT after every participant has durably promised it can commit.</p>
+<pre>interface ResourceManager {          // one per participant (e.g. Wallet DB)
+    Vote prepare(Xid xid);           // do work, flush redo/undo log, lock -> YES or NO
+    void commit(Xid xid);            // apply and release locks
+    void abort(Xid xid);             // roll back and release locks
+}
+// Coordinator, phase 1 then phase 2:
+boolean allYes = participants.stream().allMatch(rm -&gt; rm.prepare(xid) == Vote.YES);
+log.force(allYes ? Decision.COMMIT : Decision.ABORT);   // point of no return
+participants.forEach(rm -&gt; { if (allYes) rm.commit(xid); else rm.abort(xid); });</pre>` },
+    { title: `The two phases, step by step`, figureAfter: "2pc-flow", body: `<ol>
+<li><b>Phase 1 — prepare / voting.</b> The coordinator sends <code>PREPARE</code> to every participant. Each participant does the work, flushes it to its redo/undo log, takes the necessary locks, and replies <code>VOTE-COMMIT</code> (yes) or <code>VOTE-ABORT</code> (no). After voting yes a participant enters the <b>prepared / in-doubt</b> state: it has given up the right to abort on its own and must wait for orders while holding its locks.</li>
+<li><b>Phase 2 — commit / abort.</b> If all votes are yes, the coordinator writes a <code>COMMIT</code> record to its own log (this is the point of no return) and broadcasts <code>COMMIT</code>. Participants apply, release locks, and acknowledge. If any vote was no (or a timeout occurred), the coordinator broadcasts <code>ABORT</code> and everyone rolls back.</li>
+</ol>
+<p>Because a participant that voted yes has durably logged its intent, it can always honor the coordinator's later decision even after its own restart.</p>` },
+    { title: `The blocking problem`, body: `<p>2PC's fatal weakness is the in-doubt window. Suppose every participant has voted yes and is holding locks, and then the <b>coordinator crashes before broadcasting the decision</b>. A prepared participant cannot unilaterally commit (another might have to abort) nor unilaterally abort (the coordinator may have already logged COMMIT). It must <b>block</b> — holding locks and refusing conflicting transactions — until the coordinator recovers and re-sends the decision. This is why 2PC is called a <em>blocking</em> protocol and why it does not tolerate coordinator failure or a network partition (it sacrifices availability, the CAP-style trade-off).</p>` },
+    { title: `Costs and when to use it`, body: `<p>Every commit costs two network round trips plus forced log flushes, and locks are held across those round trips — so throughput drops and deadlock risk rises under contention. Latency of the whole transaction is bounded by the slowest participant.</p>
+<p>Use 2PC when you genuinely need cross-resource atomicity and the participants are reliable, low-latency, and co-located (e.g. XA across shards of the same database, or a DB plus a transactional queue on the same network). Avoid it across service or datacenter boundaries where the coordinator can partition away — there, prefer a <b>saga</b> with compensations, or the <b>transactional outbox</b> to make one local commit publish reliable events. 3PC attempts to remove the blocking window but is rarely used in practice.</p>` },
+  ],
+  related: ["three-pc", "saga", "tcc", "transactional-outbox", "isolation-levels"],
 };
 
 export function createSimulation(stage, panel, stageEl) {
-  return sequenceSim(stage, panel, stageEl, {
-    note: "Coordinator drives PREPARE then COMMIT across participants.",
-    toggles: [{ key: "crash", label: "Coordinator crashes after PREPARE", kind: "warn", value: false }],
-    scenario(ctx) {
-      const crash = ctx.toggles.crash;
-      const actors = [
-        { id: "p1", label: "Wallet DB", color: C.ledger, kind: "db", value: "idle" },
-        { id: "c", label: "Coordinator", color: C.accent },
-        { id: "p2", label: "Inventory DB", color: C.gateway, kind: "db", value: "idle" },
-      ];
-      let steps = [
-        { from: "c", to: "p1", label: "PREPARE", set: { p1: "prepared (locked)" } },
-        { from: "c", to: "p2", label: "PREPARE", set: { p2: "prepared (locked)" } },
-      ];
-      if (!crash) {
-        steps.push(
-          { from: "c", to: "p1", label: "COMMIT", good: true, set: { p1: "committed" } },
-          { from: "c", to: "p2", label: "COMMIT", good: true, set: { p2: "committed" } },
-        );
-      } else {
-        steps.push(
-          { from: "c", to: "c", label: "✖ crash", self: true, bad: true, set: { c: "DOWN" } },
-          { from: "p1", to: "p1", label: "waiting… locks held", self: true, bad: true, set: { p1: "BLOCKED" } },
-          { from: "p2", to: "p2", label: "waiting… locks held", self: true, bad: true, set: { p2: "BLOCKED" } },
-        );
-      }
-      return {
-        actors, steps, stepDur: 1.1,
-        status: (r) => !r.done ? { text: "phase 1: prepare…", cls: "" }
-          : crash ? { text: "participants blocked (holding locks)", cls: "err" } : { text: "atomic commit across both DBs", cls: "ok" },
-      };
-    },
-  });
+  return createTopicSim("two-pc", stage, panel, stageEl);
 }

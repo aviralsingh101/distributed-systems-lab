@@ -1,7 +1,5 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { tradeoffTemplate } from "../../../sim/templates/index.js";
 
 const topic = makeTopic({
   id: "inheritance-pitfalls",
@@ -9,76 +7,74 @@ const topic = makeTopic({
   category: "lld-oop",
   track: "lld",
   tier: "essential",
-  archetype: "pattern",
-  oneliner: `Fragile base class and deep trees.`,
+  archetype: "concept",
+  oneliner: `Implementation inheritance is the tightest coupling in OOP; used for reuse rather than true subtyping, it produces fragile, rigid hierarchies.`,
   sections: [
-    { title: `Motivation`, body: `<p>Fragile base class and deep trees.</p>
-<p>Without <b>Inheritance Pitfalls</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Inheritance Pitfalls</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Inheritance Pitfalls</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Inheritance Pitfalls</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Inheritance Pitfalls</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Inheritance Pitfalls</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+    { title: `Why inheritance is risky`, body: `<p>Class inheritance is powerful but it is the <b>strongest form of coupling</b> a language offers. A subclass sees the base class's protected fields and methods, overrides its behavior, and depends on the order in which the base calls its own methods. That means the base and its subclasses are one tightly bound unit — a change to the base can break subclasses that were written and tested long ago.</p>
+<p>Most abuse comes from using inheritance for <em>code reuse</em> ("I want those methods") rather than for a real <b>is-a</b> subtype relationship. Reuse is a has-a concern, better served by composition.</p>` },
+    { title: `The fragile base class problem — how it works`, body: `<p>This is the canonical pitfall. Suppose a base <code>Ledger.recordAll(entries)</code> loops calling its own <code>record(e)</code>. A subclass overrides <code>record</code> to add validation. Later someone "optimizes" the base so <code>recordAll</code> writes entries directly instead of calling <code>record</code> — a change that looks internal and safe. The subclass's validation is now silently bypassed. The base changed its <em>self-call pattern</em>, an implementation detail the subclass unknowingly depended on, and correctness broke without any compile error.</p>
+<pre>// Base class — looks innocent
+public class Ledger {
+    protected final List&lt;LedgerEntry&gt; entries = new ArrayList&lt;&gt;();
+
+    public void record(LedgerEntry entry) {
+        entries.add(entry);
+    }
+
+    public void recordAll(List&lt;LedgerEntry&gt; batch) {
+        for (LedgerEntry e : batch) {
+            record(e);  // self-call — subclass hooks in here
+        }
+    }
+}
+
+// Subclass adds compliance validation by overriding record()
+public class ValidatedLedger extends Ledger {
+    @Override
+    public void record(LedgerEntry entry) {
+        if (entry.amountCents() &lt; 0) {
+            throw new IllegalArgumentException("negative amounts require approval");
+        }
+        super.record(entry);
+    }
+}</pre>
+<p>Now a well-meaning "optimization" in the base class bypasses the subclass entirely:</p>
+<pre>// "Optimized" base — BREAKS ValidatedLedger silently
+public void recordAll(List&lt;LedgerEntry&gt; batch) {
+    entries.addAll(batch);  // never calls record() — validation skipped!
+}</pre>
+<p>No compile error, no test failure if nobody exercises <code>ValidatedLedger</code> through <code>recordAll</code>. The subclass assumed a self-call contract the base never documented.</p>` },
+    { title: `Deep and wide hierarchies`, body: `<p>Two more failure modes appear as hierarchies grow. <b>Deep trees</b> make behavior hard to trace: to understand one method you must read every ancestor, and a field's meaning may be set five levels up. <b>The subclass explosion</b> arises when objects vary along several independent axes at once — payment method × currency × channel — and a single inheritance tree can only encode one axis, forcing a class per combination.</p>
+<pre>// Subclass explosion: one class per (method × region) pair
+public abstract class PaymentProcessor { /* ... */ }
+public class StripeUsProcessor extends PaymentProcessor { /* ... */ }
+public class StripeEuProcessor extends PaymentProcessor { /* ... */ }
+public class AdyenUsProcessor extends PaymentProcessor { /* ... */ }
+public class AdyenEuProcessor extends PaymentProcessor { /* ... */ }
+// Adding PayPal × APAC = yet another subclass...</pre>
+<p>Composition (or the Bridge/Strategy patterns) collapses these back into small, combinable parts: a <code>PaymentGateway</code> strategy plus a <code>TaxRules</code> strategy, composed at runtime rather than multiplied into subclasses.</p>` },
+    { title: `Fixing and preventing`, body: `<p>Prevention and remedies: prefer <b>composition and delegation</b> for reuse; keep any inheritance shallow and rooted in a genuine, Liskov-safe is-a relationship. If you design a class for inheritance, document its self-call contract and which methods are safe to override; otherwise mark the class <code>final</code> or sealed so no one subclasses an unprepared base.</p>
+<pre>// FIX: use composition — validation is explicit, not hidden in override
+public final class ValidatedLedger {
+    private final Ledger ledger = new Ledger();
+
+    public void record(LedgerEntry entry) {
+        if (entry.amountCents() &lt; 0) {
+            throw new IllegalArgumentException("negative amounts require approval");
+        }
+        ledger.record(entry);
+    }
+
+    public void recordAll(List&lt;LedgerEntry&gt; batch) {
+        for (LedgerEntry e : batch) {
+            record(e);  // validation always runs — we own the loop
+        }
+    }
+}</pre>
+<p>Favor interfaces (behavioral contracts) over concrete base classes, and never override a method to weaken or disable behavior callers rely on — that is an LSP violation dressed up as reuse.</p>` },
   ],
-  figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Inheritance Pitfalls structure">
-<defs><marker id="fig-inheritance-pitfalls-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Inheritance Pit…</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-inheritance-pitfalls-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-inheritance-pitfalls-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-inheritance-pitfalls-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Inheritance Pitfalls — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Inheritance Pitfalls pattern — components and data flow in Order Service.` }
-  ],
-  related: [],
-  
-  
-  template: "tradeoff",
-  sim: () => ({
-    note: `Explore Inheritance Pitfalls in the payment platform.`,
-    toggleLabel: "Switch approach",
-    labelA: "Without pattern",
-    labelB: "With Inheritance Pitfalls",
-    sideA: () => ({ nodes: [
-      { title: "Monolith path", active: true },
-      { title: "Tight coupling", value: "risk" },
-      { title: "Scale wall", value: "soon" },
-    ]}),
-    sideB: () => ({ nodes: [
-      { title: "Clear boundary", active: true },
-      { title: "Inheritance Pitfalls", value: "applied" },
-      { title: "Independent scale", value: "ok" },
-    ]}),
-    status: (ctx, t, useB) => ({ text: useB ? "Inheritance Pitfalls — better fit" : "naive — hits limits", cls: useB ? "ok" : "warn" }),
-  }),
+  related: ["composition-over-inheritance", "liskov-substitution-principle", "polymorphism", "encapsulation"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

@@ -1,7 +1,7 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { layerTemplate } from "../../../sim/templates/index.js";
+
+const STR_SVG = `<svg viewBox="0 0 540 150" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Strangler facade routing to old or new implementation"><defs><marker id="fig-strangler-code-level-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs><rect x="14" y="58" width="96" height="42" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/><text x="62" y="76" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">Callers</text><text x="62" y="90" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">interface</text><rect x="160" y="56" width="120" height="46" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/><text x="220" y="74" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">Facade</text><text x="220" y="88" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">flag routes %</text><rect x="360" y="18" width="150" height="36" rx="6" fill="#1a2236" stroke="#93a1bd" stroke-width="1.5"/><text x="435" y="40" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">legacy impl</text><rect x="360" y="98" width="150" height="36" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/><text x="435" y="120" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">new impl</text><line x1="110" y1="79" x2="158" y2="79" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-strangler-code-level-arr)"/><line x1="280" y1="72" x2="358" y2="40" stroke="#93a1bd" stroke-width="1.3" stroke-dasharray="3 3" marker-end="url(#fig-strangler-code-level-arr)"/><line x1="280" y1="86" x2="358" y2="114" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-strangler-code-level-arr)"/><text x="250" y="146" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">shift traffic new; delete legacy when 0% remains</text></svg>`;
 
 const topic = makeTopic({
   id: "strangler-code-level",
@@ -10,68 +10,89 @@ const topic = makeTopic({
   track: "lld",
   tier: "essential",
   archetype: "pattern",
-  oneliner: `Replace module behind facade.`,
+  oneliner: "Replace a legacy module incrementally by hiding it behind an interface and shifting calls to a new implementation until the old one can be deleted.",
   sections: [
-    { title: `Motivation`, body: `<p>Replace module behind facade.</p>
-<p>Without <b>Strangler at Code Level</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Strangler at Code Level</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Strangler at Code Level</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Strangler at Code Level</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Strangler at Code Level</b> changes to production:</p>
+    {
+      title: "The problem: rewriting in place is a big-bang risk",
+      body: `<p>You have a gnarly legacy class — a tangled <code>PaymentProcessor</code> — that you must modernize. A big-bang rewrite is risky: you cannot ship for weeks, and the cut-over is all-or-nothing. The <b>strangler</b> approach (from Martin Fowler's strangler fig) replaces it <em>gradually</em>: new code grows around the old, taking over responsibilities one at a time, until the legacy is fully surrounded and can be removed.</p>
+<p>This page is the <em>code-level</em> variant — refactoring within a codebase — as opposed to the architecture-level strangler fig that migrates whole services behind a routing facade.</p>`,
+    },
+    {
+      title: "Structure — the facade / seam",
+      figureAfter: "str-flow",
+      body: `<p>The enabling move is to insert an <b>interface (seam)</b> between callers and the legacy code, so callers depend on an abstraction rather than the concrete legacy class:</p>
 <ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
+<li>Define <code>PaymentProcessor</code> as an interface.</li>
+<li>Wrap the existing code as <code>LegacyPaymentProcessor implements PaymentProcessor</code>.</li>
+<li>Point all callers at the interface. Behavior is unchanged — this is a pure, safe refactor.</li>
 </ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Strangler at Code Level</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<p>A <b>facade</b> (or a routing/dispatch implementation) now stands where callers used to reach in directly, giving you one controlled place to redirect calls.</p>`,
+    },
+    {
+      title: "Implementation flow",
+      body: `<ol>
+<li>Introduce the interface and adapt the legacy class behind it (no behavior change).</li>
+<li>Build a <code>NewPaymentProcessor</code> implementing the same interface for one slice of functionality.</li>
+<li>In the facade, route that slice to the new implementation behind a <b>feature flag</b>; keep the rest on legacy.</li>
+<li>Verify with tests and (optionally) a <b>parallel run</b>: execute both and compare outputs before trusting the new path.</li>
+<li>Shift more slices over incrementally, expanding the flag's scope.</li>
+<li>When 100% flows to the new implementation and has soaked in production, delete the legacy class and the facade branch.</li>
+</ol>
+<pre>// --- Step 1: extract interface, wrap legacy ---
+public interface PaymentProcessor {
+    PaymentResult process(PaymentRequest request);
+}
+
+@Component
+public class LegacyPaymentProcessor implements PaymentProcessor {
+    @Override
+    public PaymentResult process(PaymentRequest req) {
+        // existing tangled code unchanged
+    }
+}</pre>
+<pre>// --- Step 2–3: facade routes by feature flag ---
+@Component
+@Primary
+public class RoutingPaymentProcessor implements PaymentProcessor {
+    private final LegacyPaymentProcessor legacy;
+    private final NewStripeProcessor stripe;
+    private final FeatureFlags flags;
+
+    @Override
+    public PaymentResult process(PaymentRequest req) {
+        if (flags.isEnabled("stripe-processor", req.merchantId())) {
+            return stripe.process(req);
+        }
+        return legacy.process(req);
+    }
+}</pre>
+<pre>// --- Step 4: parallel run for verification ---
+public PaymentResult processWithShadow(PaymentRequest req) {
+    PaymentResult primary = routing.process(req);
+    if (flags.isEnabled("shadow-stripe")) {
+        CompletableFuture.runAsync(() -&gt; {
+            PaymentResult shadow = stripe.process(req);
+            comparator.assertEquivalent(primary, shadow);
+        });
+    }
+    return primary;
+}</pre>`,
+    },
+    {
+      title: "Why it works and what to watch",
+      body: `<p>Each step is small, independently shippable, and reversible via the flag, so you keep releasing throughout the migration and can roll back instantly. The safety net is <b>characterization tests</b> — tests that pin down the legacy's current behavior (bugs included) so the new implementation is proven equivalent. Risks: the interface must be a clean seam (a leaky one drags legacy assumptions forward); running two implementations in parallel adds temporary complexity and cost; and teams often forget the final <em>delete</em> step, leaving dead code and permanent branching.</p>`,
+    },
+    {
+      title: "Tradeoffs",
+      body: `<p><b>Pros:</b> low-risk, incremental modernization with continuous delivery; instant rollback via flags; forces clean abstractions that improve testability even before the rewrite finishes.</p>
+<p><b>Cons:</b> the codebase temporarily hosts two implementations plus routing scaffolding; requires disciplined test coverage of legacy behavior; benefits vanish if you never complete and clean up. <b>Use when</b> the legacy is too big or risky to rewrite at once and must keep running; <b>avoid</b> when the module is small enough to rewrite and swap in a single safe change.</p>`,
+    },
   ],
   figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Strangler at Code Level structure">
-<defs><marker id="fig-strangler-code-level-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Strangler at Co…</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-strangler-code-level-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-strangler-code-level-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-strangler-code-level-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Strangler at Code Level — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Strangler at Code Level pattern — components and data flow in Order Service.` }
+    { id: "str-flow", svg: STR_SVG, caption: "Code-level strangler: callers depend on an interface; a facade shifts a growing share of calls from the legacy to the new implementation until legacy is deleted." },
   ],
-  related: [],
-  
-  
-  template: "layer",
-  sim: () => ({
-    note: `Explore Strangler at Code Level in the payment platform.`,
-    toggles: [{ key: "fix", label: "Apply layering", kind: "ok", value: false }],
-    layers: (ctx) => [
-      { name: "API", components: [{ title: "REST/gRPC", active: true }] },
-      { name: "Domain", components: [{ title: "Strangler at Code Level", active: ctx.toggles.fix, color: C.accent }] },
-      { name: "Data", components: [{ title: "Ledger", color: C.ledger }, { title: "Queue", color: C.queue }] },
-    ],
-    status: (ctx) => ({ text: ctx.toggles.fix ? "clean separation" : "logic leaks across layers", cls: ctx.toggles.fix ? "ok" : "err" }),
-  }),
+  related: ["strangler-fig", "anti-corruption-code-boundary", "test-doubles"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

@@ -1,7 +1,21 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { dataModelTemplate } from "../../../sim/templates/index.js";
+
+const CAS_SVG = `<svg viewBox="0 0 640 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Two transactions racing on a versioned row; the second update fails the version check">
+  <defs><marker id="fig-optimistic-locking-schema-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
+  <rect x="250" y="15" width="140" height="34" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
+  <text x="320" y="37" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="ui-monospace,monospace">wallet v=5</text>
+  <rect x="30" y="80" width="230" height="34" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.3"/>
+  <text x="145" y="102" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="ui-monospace,monospace">Txn A: read v=5, write WHERE v=5</text>
+  <rect x="380" y="80" width="230" height="34" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.3"/>
+  <text x="495" y="102" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="ui-monospace,monospace">Txn B: read v=5, write WHERE v=5</text>
+  <rect x="30" y="150" width="230" height="34" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
+  <text x="145" y="172" text-anchor="middle" fill="#3ddc97" font-size="10" font-family="ui-monospace,monospace">1 row updated → v=6 ✓ commit</text>
+  <rect x="380" y="150" width="230" height="34" rx="6" fill="#1a2236" stroke="#ff6b6b" stroke-width="1.5"/>
+  <text x="495" y="172" text-anchor="middle" fill="#ff6b6b" font-size="10" font-family="ui-monospace,monospace">0 rows updated → conflict, retry</text>
+  <line x1="290" y1="49" x2="150" y2="78" stroke="#5b9dff" stroke-width="1.2" marker-end="url(#fig-optimistic-locking-schema-arr)"/>
+  <line x1="350" y1="49" x2="490" y2="78" stroke="#5b9dff" stroke-width="1.2" marker-end="url(#fig-optimistic-locking-schema-arr)"/>
+</svg>`;
 
 const topic = makeTopic({
   id: "optimistic-locking-schema",
@@ -10,67 +24,146 @@ const topic = makeTopic({
   track: "lld",
   tier: "essential",
   archetype: "pattern",
-  oneliner: `Version column for CAS updates.`,
+  oneliner: `A version column plus a compare-and-set UPDATE lets concurrent writers detect a lost update at commit time — no long-held row locks required.`,
   sections: [
-    { title: `Motivation`, body: `<p>Version column for CAS updates.</p>
-<p>Without <b>Optimistic Locking Schema</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>Concurrency control prevents conflicting wallet updates. Row-level locks block concurrent writers; version columns enable optimistic retry; distributed locks (Redis, etcd) coordinate cross-service critical sections with fencing tokens.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Optimistic Locking Schema</b>:</p>
+    { title: `The problem it prevents`, body: `<p>The classic <b>lost update</b>: two requests read a wallet balance of 100, each computes a new value in application code, and each writes it back. The second write silently overwrites the first, and one debit vanishes. This happens whenever read-modify-write straddles a network round trip and the reads are not serialized.</p>
+<p><b>Optimistic locking</b> assumes conflicts are rare and does not lock the row while the user thinks. Instead it detects, at write time, that the row changed underneath you — and forces a retry rather than allowing the overwrite.</p>
+<pre>// Without @Version: second write silently overwrites first
+// Txn A reads balance=100, Txn B reads balance=100
+// Txn A writes balance=80, Txn B writes balance=70
+// Result: balance=70 — one debit lost
+
+@Entity
+@Table(name = "wallets")
+public class Wallet {
+
+    @Id
+    private String id;
+
+    @Column(name = "balance_minor", nullable = false)
+    private long balanceMinor;
+
+    @Version
+    @Column(name = "version", nullable = false)
+    private int version;  // JPA auto-appends WHERE version = ? on UPDATE
+}</pre>` },
+    { title: `Structure: the version column`, figureAfter: "cas-race", body: `<p>Add a monotonic <b>version</b> column (an integer bumped on every write; a timestamp works too but is weaker under clock skew):</p>
+<p><code>ALTER TABLE wallet ADD COLUMN version INT NOT NULL DEFAULT 0;</code></p>
+<p>The write becomes a <b>compare-and-set (CAS)</b>: update only if the version is still the one you read, and bump it in the same statement:</p>
+<p><code>UPDATE wallet SET balance = :new_balance, version = version + 1 WHERE id = :id AND version = :read_version;</code></p>
+<p>The database reports how many rows matched. <b>1 row</b> means you won — nobody changed it since your read. <b>0 rows</b> means someone else committed first (the version moved), so your update is a no-op and you must retry.</p>
+<pre>// JPA @Version — Hibernate auto-generates the CAS predicate
+@Entity
+@Table(name = "wallets")
+public class Wallet {
+
+    @Id
+    private String id;
+
+    @Column(name = "balance_minor", nullable = false)
+    private long balanceMinor;
+
+    @Column(name = "currency", nullable = false, length = 3)
+    private String currency;
+
+    @Version
+    @Column(name = "version", nullable = false)
+    private int version;
+
+    public void debit(long amountMinor) {
+        if (balanceMinor &lt; amountMinor) {
+            throw new InsufficientFundsException(id);
+        }
+        balanceMinor -= amountMinor;
+        // version bumped automatically on save()
+    }
+}</pre>` },
+    { title: `The retry loop`, body: `<p>Optimistic locking is only complete with a caller that reacts to the zero-row result:</p>
 <ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
+<li>Read the row and its <code>version</code>.</li>
+<li>Compute the new state in application code.</li>
+<li>Run the CAS <code>UPDATE ... WHERE id = ? AND version = ?</code>.</li>
+<li>If <code>rowsAffected == 1</code>, commit. If <code>0</code>, discard, re-read the fresh row, and repeat — usually with a small bounded number of attempts and jittered backoff.</li>
 </ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Optimistic Locking Schema</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Optimistic Locking Schema</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Optimistic Locking Schema</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<p>Never treat 0 rows as success. Frameworks package this: JPA/Hibernate <code>@Version</code> auto-appends the predicate and throws <code>OptimisticLockException</code> on a zero-row update.</p>
+<pre>@Service
+public class WalletDebitService {
+
+    private static final int MAX_RETRIES = 3;
+    private final WalletRepository walletRepository;
+    private final LedgerEntryRepository ledgerRepository;
+
+    @Transactional
+    public void debitWithRetry(String walletId, long amountMinor, String paymentId) {
+        for (int attempt = 0; attempt &lt; MAX_RETRIES; attempt++) {
+            try {
+                Wallet wallet = walletRepository.findById(walletId).orElseThrow();
+                wallet.debit(amountMinor);
+                walletRepository.save(wallet);
+                ledgerRepository.save(new LedgerEntry(walletId, -amountMinor, paymentId));
+                return;
+            } catch (OptimisticLockException ex) {
+                if (attempt == MAX_RETRIES - 1) {
+                    throw new WalletConflictException(walletId);
+                }
+                // jittered backoff before re-read
+                Thread.sleep(10 + ThreadLocalRandom.current().nextInt(20));
+            }
+        }
+    }
+}</pre>` },
+    { title: `Where it shines and where it hurts`, body: `<p>Because no lock is held between read and write, optimistic locking gives high throughput and no risk of one slow client blocking others — ideal under <b>low to moderate contention</b> (distinct wallets, distinct orders). Its weakness is <b>hot rows</b>: if hundreds of requests target the same wallet, the version keeps moving, retries pile up, and you get a livelock of wasted work. There, a serialized approach (pessimistic <code>SELECT ... FOR UPDATE</code>, or funneling updates through a single writer/queue) wins.</p>
+<pre>// Hot row: pessimistic lock instead of optimistic retry storm
+@Repository
+public interface WalletRepository extends JpaRepository&lt;Wallet, String&gt; {
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT w FROM Wallet w WHERE w.id = :id")
+    Optional&lt;Wallet&gt; findByIdForUpdate(@Param("id") String id);
+}
+
+@Service
+public class HotWalletDebitService {
+    @Transactional
+    public void debitHotWallet(String walletId, long amountMinor) {
+        Wallet wallet = walletRepository.findByIdForUpdate(walletId).orElseThrow();
+        wallet.debit(amountMinor);
+        walletRepository.save(wallet);
+    }
+}</pre>` },
+    { title: `Notes and pitfalls`, body: `<p>Bump the version on <em>every</em> meaningful write path, or a change through a forgotten path becomes an invisible lost update. For multi-row aggregates, version the aggregate root so a change to any child invalidates concurrent readers of the whole. Return a clear <code>409 Conflict</code> to clients when retries are exhausted rather than retrying forever. And pair optimistic locking with an <b>idempotency key</b> on the request so an automatic client retry after a conflict does not double-apply the effect.</p>
+<pre>@Entity
+@Table(name = "payments")
+public class Payment {
+
+    @Id
+    private String id;
+
+    @Column(name = "idempotency_key", nullable = false, unique = true)
+    private String idempotencyKey;
+
+    @Version
+    @Column(name = "version", nullable = false)
+    private int version;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false)
+    private PaymentStatus status;
+}
+
+@ExceptionHandler(WalletConflictException.class)
+public ProblemDetail handleConflict(WalletConflictException ex) {
+    ProblemDetail problem = ProblemDetail.forStatus(HttpStatus.CONFLICT);
+    problem.setProperty("code", "wallet_optimistic_lock_conflict");
+    problem.setDetail("Concurrent update on wallet " + ex.getWalletId() + ". Retry with same idempotency key.");
+    return problem;
+}</pre>` },
   ],
   figures: [
-    { id: "dist-lock", svg: `<svg viewBox="0 0 400 110" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Distributed lock">
-<rect x="40" y="38" width="70" height="36" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
-<text x="75" y="60" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Pod A</text>
-<rect x="40" y="78" width="70" height="28" rx="6" fill="#1a2236" stroke="#ff5c6c" stroke-width="1.5"/>
-<text x="75" y="86" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Pod B</text><text x="75" y="106" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">stale</text>
-<rect x="160" y="48" width="90" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="205" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Redis Lock</text><text x="205" y="82" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">token=42</text>
-<rect x="290" y="38" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="335" y="60" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger</text>
-<text x="200" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Only token holder may write</text>
-</svg>`, caption: `Distributed lock: SET key NX PX with unique token; stale holder rejected via fencing token.` }
+    { id: "cas-race", svg: CAS_SVG, caption: "Both transactions read version 5. The first CAS update bumps it to 6 and wins; the second matches zero rows and must re-read and retry." },
   ],
-  related: ["lost-update", "optimistic-locking", "pessimistic-locking"],
-  
-  
-  template: "dataModel",
-  sim: () => ({
-    note: `Explore Optimistic Locking Schema in the payment platform. — schema view`,
-    toggles: [{ key: "fix", label: "Normalized design", kind: "ok", value: false }],
-    tables: (ctx) => ctx.toggles.fix ? [
-      { name: "payments", cols: [{ name: "id", pk: true }, { name: "wallet_id", fk: true }, { name: "amount" }] },
-      { name: "wallets", cols: [{ name: "id", pk: true }, { name: "balance" }] },
-      { name: "outbox", cols: [{ name: "id", pk: true }, { name: "event", fk: true }] },
-    ] : [
-      { name: "everything", cols: [{ name: "blob", pk: true }, { name: "misc" }] },
-    ],
-    relations: [{ from: "payments", to: "wallets" }],
-    status: (ctx) => ({ text: ctx.toggles.fix ? "schema supports Optimistic Locking Schema" : "schema fights the pattern", cls: ctx.toggles.fix ? "ok" : "warn" }),
-  }),
+  related: ["optimistic", "pessimistic", "lost-update", "audit-tables"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

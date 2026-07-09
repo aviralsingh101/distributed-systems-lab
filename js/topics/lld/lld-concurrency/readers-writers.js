@@ -1,7 +1,19 @@
 // @article-v2
+// @sim-lab
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { stateMachineTemplate } from "../../../sim/templates/index.js";
+import { createTopicSim } from "../../../sim/lab/registry.js";
+
+const RW_SVG = `<svg viewBox="0 0 720 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Reader-writer lock states">
+  <rect x="30" y="55" width="200" height="50" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
+  <text x="130" y="76" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">shared (read) mode</text>
+  <text x="130" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">R1 · R2 · R3 concurrent</text>
+  <rect x="490" y="55" width="200" height="50" rx="6" fill="#1a2236" stroke="#ff6b6b" stroke-width="1.5"/>
+  <text x="590" y="76" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">exclusive (write) mode</text>
+  <text x="590" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">W1 alone — all others wait</text>
+  <text x="360" y="70" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">no active readers</text>
+  <text x="360" y="86" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">⇄ acquire / release ⇄</text>
+  <text x="360" y="140" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">many readers OR one writer — never both</text>
+</svg>`;
 
 const topic = makeTopic({
   id: "readers-writers",
@@ -10,74 +22,78 @@ const topic = makeTopic({
   track: "lld",
   tier: "essential",
   archetype: "pattern",
-  oneliner: `Many readers or one writer.`,
+  oneliner: `A lock that allows many concurrent readers or a single exclusive writer, exploiting the fact that concurrent reads of immutable data are safe.`,
   sections: [
-    { title: `Motivation`, body: `<p>Many readers or one writer.</p>
-<p>Without <b>Readers-Writers</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Readers-Writers</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Readers-Writers</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Readers-Writers</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Readers-Writers</b> changes to production:</p>
+    { title: `The insight`, body: `<p>A plain mutex serializes <em>all</em> access, but concurrent reads never conflict with each other — only writes do. A <b>reader-writer lock</b> (shared/exclusive lock) exploits this: it grants the lock in <b>shared mode</b> to any number of readers simultaneously, but in <b>exclusive mode</b> to at most one writer with no readers present. It is the right tool for read-heavy shared state such as a config cache, a routing table, or an in-memory price map.</p>` },
+    { title: `Structure and rules`, figureAfter: "rw", body: `<p>The lock exposes four operations: <code>lockRead</code> / <code>unlockRead</code> and <code>lockWrite</code> / <code>unlockWrite</code>. The invariant is simple: the number of active writers is 0 or 1, and if a writer is active the number of active readers is 0. So the states are: idle, N readers active, or 1 writer active.</p>
 <ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
+<li>A reader acquires if no writer holds or is (depending on policy) waiting.</li>
+<li>A writer acquires only when there are zero active readers and zero active writers.</li>
 </ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Readers-Writers</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<p>Internally this is a mutex protecting a reader count plus condition variables that writers wait on until the count drops to zero.</p>
+<pre>// Read-heavy FX rate table: many payment conversions, rare admin updates
+public final class ExchangeRateCache {
+    private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
+    private final Map&lt;String, BigDecimal&gt; rates = new HashMap&lt;&gt;();
+
+    public BigDecimal getRate(String currencyPair) {
+        lock.readLock().lock();
+        try {
+            return rates.get(currencyPair);
+        } finally {
+            lock.readLock().unlock();
+        }
+    }
+
+    public void updateRate(String pair, BigDecimal rate) {
+        lock.writeLock().lock();
+        try {
+            rates.put(pair, rate);
+        } finally {
+            lock.writeLock().unlock();
+        }
+    }
+
+    public Money convert(Money amount, String targetCurrency) {
+        BigDecimal rate = getRate(amount.currency() + "-" + targetCurrency);
+        return amount.convertTo(targetCurrency, rate);
+    }
+}</pre>` },
+    { title: `Writer starvation and fairness`, body: `<p>The naive "let readers in whenever no writer is active" policy is <b>read-preferring</b>, and under a steady stream of readers a writer can wait forever — as long as at least one reader is always active, the reader count never reaches zero. This is <b>writer starvation</b>. Fairness policies fix it:</p>
+<ul>
+<li><b>Write-preferring:</b> once a writer is waiting, new readers queue behind it, so the reader count can drain and the writer proceeds. Risks reader starvation under write-heavy load.</li>
+<li><b>Fair / FIFO:</b> requests are served roughly in arrival order, bounding wait time for both sides at the cost of some read concurrency.</li>
+</ul>` },
+    { title: `When it actually helps`, body: `<p>A reader-writer lock only pays off when reads genuinely dominate <em>and</em> the critical section is long enough that read parallelism matters; its bookkeeping is heavier than a plain mutex, so for very short critical sections a mutex is faster. For read-mostly data where writes are rare, prefer lower-contention alternatives entirely: an immutable snapshot swapped atomically on update (copy-on-write) lets readers proceed with no lock at all, and RCU (read-copy-update) generalizes this. Reach for a reader-writer lock when in-place mutation is required and reads clearly outnumber writes.</p>
+<pre>// Copy-on-write alternative: readers never block
+public final class ImmutableRateTable {
+    private volatile Map&lt;String, BigDecimal&gt; rates = Map.of();
+
+    public BigDecimal getRate(String pair) {
+        return rates.get(pair);  // volatile read — no lock
+    }
+
+    public void updateRate(String pair, BigDecimal rate) {
+        Map&lt;String, BigDecimal&gt; next = new HashMap&lt;&gt;(rates);
+        next.put(pair, rate);
+        this.rates = Map.copyOf(next);  // atomic swap
+    }
+}
+
+// PaymentService reads rates thousands/sec; treasury updates once/hour
+Money usdTotal = orders.stream()
+    .map(o -&gt; rateTable.convert(o.amount(), "USD"))
+    .reduce(Money.ZERO, Money::add);</pre>` },
   ],
   figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Readers-Writers structure">
-<defs><marker id="fig-readers-writers-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Readers-Writers</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-readers-writers-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-readers-writers-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-readers-writers-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Readers-Writers — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Readers-Writers pattern — components and data flow in Order Service.` }
+    { id: "rw", svg: RW_SVG, caption: "The lock is held either by many readers in shared mode or by one writer in exclusive mode — the two modes are mutually exclusive." },
   ],
-  related: [],
-  
-  
-  template: "stateMachine",
-  sim: () => ({
-    note: `Explore Readers-Writers in the payment platform.`,
-    toggles: [{ key: "fix", label: "Valid transitions only", kind: "ok", value: false }],
-    states: (ctx) => [
-      { id: "pending", label: "Pending", x: 200, y: 280, color: C.service },
-      { id: "active", label: "Readers-Writers", x: 500, y: 280, color: C.accent, good: true },
-      { id: "done", label: "Settled", x: 800, y: 280, color: C.ok, good: true },
-      { id: "bad", label: "Invalid", x: 500, y: 420, color: C.err, bad: true },
-    ],
-    currentState: (ctx, t) => {
-      if (!ctx.toggles.fix && (t % 6) > 4) return "bad";
-      return ["pending", "active", "done"][Math.floor((t * 0.35) % 3)];
-    },
-    transitions: [{ from: "pending", to: "active", label: "apply" }, { from: "active", to: "done", label: "commit" }],
-    status: (ctx) => ({ text: ctx.toggles.fix ? "state machine guards flow" : "illegal states possible", cls: ctx.toggles.fix ? "ok" : "err" }),
-  }),
+  related: ["lock-free-atomic", "producer-consumer", "threads-vs-async"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
+
 export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
+  return createTopicSim("readers-writers", stage, panel, stageEl);
 }

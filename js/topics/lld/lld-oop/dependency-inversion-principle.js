@@ -1,7 +1,20 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { layerTemplate } from "../../../sim/templates/index.js";
+
+const DIP_SVG = `<svg viewBox="0 0 520 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Dependency inversion with an owned abstraction">
+  <defs><marker id="fig-dependency-inversion-principle-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#93a1bd"/></marker></defs>
+  <rect x="30" y="86" width="150" height="46" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
+  <text x="105" y="106" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">OrderService</text>
+  <text x="105" y="123" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">high-level policy</text>
+  <rect x="230" y="86" width="150" height="46" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
+  <text x="305" y="106" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">&lt;&lt;PaymentPort&gt;&gt;</text>
+  <text x="305" y="123" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">abstraction (owned by policy)</text>
+  <rect x="380" y="150" width="130" height="42" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
+  <text x="445" y="176" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">StripeAdapter</text>
+  <line x1="180" y1="109" x2="228" y2="109" stroke="#93a1bd" stroke-width="1.4" marker-end="url(#fig-dependency-inversion-principle-arr)"/>
+  <line x1="445" y1="150" x2="330" y2="134" stroke="#93a1bd" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#fig-dependency-inversion-principle-arr)"/>
+  <text x="200" y="60" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Both policy and detail depend on the abstraction; the arrow into it is "inverted".</text>
+</svg>`;
 
 const topic = makeTopic({
   id: "dependency-inversion-principle",
@@ -9,69 +22,86 @@ const topic = makeTopic({
   category: "lld-oop",
   track: "lld",
   tier: "essential",
-  archetype: "pattern",
-  oneliner: `Depend on abstractions, not concretes.`,
+  archetype: "concept",
+  oneliner: `High-level policy and low-level detail should both depend on abstractions; the abstraction should not depend on the detail.`,
   sections: [
-    { title: `Motivation`, body: `<p>Depend on abstractions, not concretes.</p>
-<p>Without <b>Dependency Inversion</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Dependency Inversion</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Dependency Inversion</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Dependency Inversion</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Dependency Inversion</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Dependency Inversion</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+    { title: `The formal statement`, body: `<p>The <b>Dependency Inversion Principle (DIP)</b>, the "D" in SOLID, has two parts. First, <em>high-level modules should not depend on low-level modules; both should depend on abstractions</em>. Second, <em>abstractions should not depend on details; details should depend on abstractions</em>.</p>
+<p>"Inversion" refers to reversing the conventional dependency direction. Normally business logic calls concrete infrastructure, so policy depends on detail. DIP flips this: the policy defines an abstraction it needs, and the infrastructure conforms to it.</p>` },
+    { title: `How it works — violation vs fix`, figureAfter: "dip-diagram", body: `<p>DIP works by placing an interface <b>between</b> policy and detail, and having the high-level module <em>own</em> that interface.</p>
+<pre>// VIOLATION: OrderService depends directly on Stripe SDK detail
+public class OrderService {
+    private final StripeClient stripe;  // low-level detail
+
+    public OrderService() {
+        this.stripe = new StripeClient(System.getenv("STRIPE_KEY"));
+    }
+
+    public Order placeOrder(PlaceOrderCommand cmd) {
+        PaymentIntent intent = stripe.paymentIntents().create(/* Stripe types */);
+        // domain logic tangled with vendor API
+    }
+}</pre>
+<p>The fix: policy owns the port; detail implements it. Both depend on the abstraction:</p>
+<pre>// Port owned by the domain — vocabulary is YOURS, not Stripe's
+public interface PaymentPort {
+    ChargeResult charge(ChargeRequest request);
+}
+
+// High-level policy depends on abstraction, not detail
+public class OrderService {
+    private final PaymentPort paymentPort;
+    private final LedgerRepository ledger;
+
+    public OrderService(PaymentPort paymentPort, LedgerRepository ledger) {
+        this.paymentPort = paymentPort;
+        this.ledger = ledger;
+    }
+
+    public Order placeOrder(PlaceOrderCommand cmd) {
+        Order order = Order.create(cmd);
+        ChargeResult result = paymentPort.charge(order.toChargeRequest());
+        if (result.status() == ChargeStatus.CAPTURED) {
+            ledger.recordDebit(cmd.walletId(), order.total(), result.processorRef());
+            order.markPaid();
+        }
+        return order;
+    }
+}
+
+// Low-level detail depends on abstraction (implements the port)
+public final class StripePaymentAdapter implements PaymentPort {
+    private final StripeClient stripe;
+    public StripePaymentAdapter(StripeClient stripe) { this.stripe = stripe; }
+
+    @Override
+    public ChargeResult charge(ChargeRequest req) {
+        // translate domain types to Stripe SDK here — detail stays here
+        PaymentIntent intent = stripe.paymentIntents().create(/* ... */);
+        return new ChargeResult(req.paymentId(), ChargeStatus.CAPTURED, intent.getId());
+    }
+}</pre>
+<p>The arrow from Stripe now points <em>up</em> toward <code>PaymentPort</code>, not from business logic <em>down</em> to Stripe. This is the backbone of hexagonal / ports-and-adapters architecture.</p>` },
+    { title: `Why invert`, body: `<p>Without inversion, the most valuable code (domain policy) is chained to volatile, replaceable code (a specific database, SDK, or vendor). Swapping Stripe for Adyen, or Postgres for DynamoDB, would ripple into the domain. With DIP, the domain depends only on a stable abstraction it defined; infrastructure is a plug-in. It also makes testing trivial — inject an in-memory fake that implements the port, with no network.</p>
+<pre>public final class FakePaymentPort implements PaymentPort {
+    @Override
+    public ChargeResult charge(ChargeRequest req) {
+        return new ChargeResult(req.paymentId(), ChargeStatus.CAPTURED, "fake-ref");
+    }
+}
+
+// Test: no Stripe, no WireMock
+@Test void placeOrder_recordsLedgerOnSuccess() {
+    OrderService svc = new OrderService(new FakePaymentPort(), new InMemoryLedger());
+    Order order = svc.placeOrder(aValidCommand());
+    assertThat(order.status()).isEqualTo(OrderStatus.PAID);
+}</pre>` },
+    { title: `DIP versus DI`, body: `<p>DIP is a <em>design principle</em> about which direction dependencies point; <b>Dependency Injection</b> is a <em>technique</em> for supplying those dependencies. You can have DI without DIP (injecting a concrete class buys testability but not decoupling from detail), and DIP is only fully realized when the abstraction is owned by the client, not by the provider. The pitfall is trivial pass-through interfaces that merely mirror one implementation — an abstraction earns its place only when it hides real, substitutable detail.</p>` },
   ],
   figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Dependency Inversion structure">
-<defs><marker id="fig-dependency-inversion-principle-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Dependency Inve…</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-dependency-inversion-principle-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-dependency-inversion-principle-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-dependency-inversion-principle-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Dependency Inversion — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Dependency Inversion pattern — components and data flow in Order Service.` }
+    { id: "dip-diagram", svg: DIP_SVG, caption: `OrderService depends on PaymentPort, which it owns; StripeAdapter also depends on PaymentPort. The dependency on detail is inverted.` },
   ],
-  related: [],
-  
-  
-  template: "layer",
-  sim: () => ({
-    note: `Explore Dependency Inversion in the payment platform.`,
-    toggles: [{ key: "fix", label: "Apply layering", kind: "ok", value: false }],
-    layers: (ctx) => [
-      { name: "API", components: [{ title: "REST/gRPC", active: true }] },
-      { name: "Domain", components: [{ title: "Dependency Inversion", active: ctx.toggles.fix, color: C.accent }] },
-      { name: "Data", components: [{ title: "Ledger", color: C.ledger }, { title: "Queue", color: C.queue }] },
-    ],
-    status: (ctx) => ({ text: ctx.toggles.fix ? "clean separation" : "logic leaks across layers", cls: ctx.toggles.fix ? "ok" : "err" }),
-  }),
+  related: ["dependency-injection", "abstraction", "interface-segregation-principle", "factory-method"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

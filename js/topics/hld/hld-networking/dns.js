@@ -1,6 +1,9 @@
 // @article-v2
+// @sim-lab
+// @sim-gold
+// @figure-handcrafted
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
+import { createTopicSim } from "../../../sim/lab/registry.js";
 
 const LOOKUP_SVG = `<svg viewBox="0 0 720 140" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="DNS lookup chain">
   <defs><marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
@@ -53,6 +56,7 @@ const topic = makeTopic({
     },
     {
       title: "How a lookup works",
+      figureAfter: "lookup-chain",
       body: `<p>When the mobile app calls <code>https://pay.api.example.com/v1/charge</code>, resolution typically follows this chain:</p>
 <ol>
 <li><b>Browser / app cache</b> — in-process cache (JVM <code>InetAddress</code> defaults to caching "forever" unless tuned).</li>
@@ -111,60 +115,10 @@ const topic = makeTopic({
     { id: "lookup-chain", svg: LOOKUP_SVG, caption: "Recursive resolution: stub resolver asks upstream; authoritative server owns the A record. Each hop caches per TTL." },
   ],
   related: ["cdn", "global-load-balancing", "tls-termination"],
-  template: "topology",
-  sim: () => ({
-    note: "Resolve pay.api.example.com — watch cache TTL and region failover.",
-    params: [
-      { key: "ttl", label: "TTL (seconds)", min: 10, max: 3600, step: 10, value: 60, live: true },
-    ],
-    toggles: [
-      { key: "regionB", label: "Route to Region B", kind: "warn", value: false },
-      { key: "failover", label: "Region A unhealthy (failover)", kind: "err", value: false },
-      { key: "cached", label: "Resolver has cached answer", kind: "warn", value: true },
-    ],
-    nodes: (ctx) => {
-      const aHealthy = !ctx.toggles.failover;
-      const targetRegion = ctx.toggles.regionB ? "B" : "A";
-      const effectiveRegion = (targetRegion === "A" && !aHealthy) ? "B (failover)" : `Region ${targetRegion}`;
-      const cacheStale = ctx.toggles.cached && ctx.toggles.failover && targetRegion === "A";
-      return [
-        { id: "client", x: 100, y: 280, title: "Client", color: C.client, value: "pay.api…" },
-        { id: "resolver", x: 300, y: 280, title: "Resolver", color: C.service, value: ctx.toggles.cached ? `cache ${ctx.params.ttl}s` : "miss" },
-        { id: "auth", x: 500, y: 200, title: "Auth DNS", color: C.accent, value: aHealthy ? "A + B" : "B only" },
-        { id: "regionA", x: 650, y: 120, title: "Region A", color: C.ledger, value: aHealthy ? "healthy" : "DOWN", bad: !aHealthy },
-        { id: "regionB", x: 650, y: 360, title: "Region B", color: C.ok, value: "standby", good: true },
-      ];
-    },
-    edges: (ctx) => {
-      const aHealthy = !ctx.toggles.failover;
-      const useB = ctx.toggles.regionB || !aHealthy;
-      const cacheStale = ctx.toggles.cached && !aHealthy && !ctx.toggles.regionB;
-      return [
-        { from: "client", to: "resolver", active: true, label: "query" },
-        { from: "resolver", to: "auth", active: !ctx.toggles.cached, label: ctx.toggles.cached ? "skip (cached)" : "recursive" },
-        { from: "auth", to: useB ? "regionB" : "regionA", active: true, label: cacheStale ? "stale A!" : "A record" },
-        { from: "auth", to: "regionA", active: !useB && aHealthy, label: "primary" },
-        { from: "auth", to: "regionB", active: useB || !aHealthy, label: "failover" },
-      ];
-    },
-    activeEdge: (ctx) => {
-      const aHealthy = !ctx.toggles.failover;
-      const useB = ctx.toggles.regionB || !aHealthy;
-      if (ctx.toggles.cached && !aHealthy && !ctx.toggles.regionB) return { from: "auth", to: "regionA" };
-      return useB ? { from: "auth", to: "regionB" } : { from: "auth", to: "regionA" };
-    },
-    status: (ctx) => {
-      const aHealthy = !ctx.toggles.failover;
-      const cacheStale = ctx.toggles.cached && !aHealthy && !ctx.toggles.regionB;
-      if (cacheStale) return { text: `Stale cache — clients hit dead Region A for up to ${ctx.params.ttl}s`, cls: "err" };
-      if (!aHealthy) return { text: "Failover active — new queries go to Region B", cls: "ok" };
-      return { text: `TTL ${ctx.params.ttl}s — cached answers persist after changes`, cls: "" };
-    },
-  }),
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
 export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
+  return createTopicSim("dns", stage, panel, stageEl);
 }

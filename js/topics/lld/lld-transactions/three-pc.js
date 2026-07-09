@@ -1,88 +1,55 @@
 // @article-v2
-import { sequenceSim } from "../../../sim/sequence.js";
-import { C } from "../../../sim/primitives.js";
+// @sim-lab
+import { createTopicSim } from "../../../sim/lab/registry.js";
 
 export const meta = { id: "three-pc", title: "Three-Phase Commit (3PC)", category: "transactions" };
 
+const FLOW_SVG = `<svg viewBox="0 0 720 150" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Three-phase commit phases">
+  <defs><marker id="fig-three-pc-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
+  <rect x="30" y="55" width="180" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
+  <text x="120" y="72" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">1. canCommit?</text>
+  <text x="120" y="87" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">vote yes/no — no locks yet</text>
+  <rect x="270" y="55" width="180" height="40" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
+  <text x="360" y="72" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">2. preCommit</text>
+  <text x="360" y="87" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">everyone knows decision = commit</text>
+  <rect x="510" y="55" width="180" height="40" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
+  <text x="600" y="72" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">3. doCommit</text>
+  <text x="600" y="87" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">apply + release</text>
+  <line x1="210" y1="75" x2="268" y2="75" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-three-pc-arr)"/>
+  <line x1="450" y1="75" x2="508" y2="75" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-three-pc-arr)"/>
+  <text x="360" y="128" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">The preCommit phase removes 2PC's in-doubt blocking — under a fail-stop, no-partition model.</text>
+</svg>`;
+
 export const content = {
-  oneliner: `Non-blocking attempt, rarely used.`,
+  oneliner: `A non-blocking variant of 2PC that adds a pre-commit phase so participants can safely decide by timeout — but only under assumptions real networks violate.`,
   archetype: "pattern",
-  sections: [
-    { title: `Motivation`, body: `<p>Non-blocking attempt, rarely used.</p>
-<p>Without <b>3PC</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>Distributed transactions split into local ACID commits plus compensating actions. Outbox pattern atomically writes business row and event intent; saga orchestrator tracks forward steps and compensation handlers per failed step.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>3PC</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>3PC</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>3PC</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>3PC</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
-  ],
   figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="3PC structure">
-<defs><marker id="fig-three-pc-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">3PC</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-three-pc-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-three-pc-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-three-pc-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">3PC — class and integration boundaries</text>
-</svg>`, caption: `Structure of the 3PC pattern — components and data flow in Order Service.` }
+    { id: "3pc-flow", svg: FLOW_SVG, caption: "Three phases: canCommit (vote), preCommit (propagate the decision), doCommit (apply)." },
   ],
-  related: [],
+  sections: [
+    { title: `Why 3PC exists`, body: `<p><b>Two-Phase Commit</b> can leave a participant that already voted yes <em>blocked</em>: if the coordinator crashes before announcing the outcome, the participant is in-doubt, holds locks, and cannot safely commit or abort on its own. <b>Three-Phase Commit (3PC)</b> attacks exactly that window by inserting an extra round so that the decision is fully propagated <em>before</em> anyone actually commits, letting survivors reach a consistent conclusion by timeout.</p>` },
+    { title: `The three phases`, figureAfter: "3pc-flow", body: `<ol>
+<li><b>canCommit?</b> — The coordinator asks each participant whether it <em>could</em> commit. Participants only validate; they do not yet lock resources or write undo logs. Each replies yes or no.</li>
+<li><b>preCommit</b> — If all said yes, the coordinator sends <code>preCommit</code>. Now each participant prepares (logs, locks) and acknowledges. Crucially, receiving preCommit tells a participant that <em>every</em> participant voted yes, so the global decision is already "commit".</li>
+<li><b>doCommit</b> — After the acks, the coordinator sends <code>doCommit</code>; participants apply and release locks.</li>
+</ol>` },
+    { title: `How the extra phase avoids blocking`, body: `<p>The safety argument rests on a simple invariant created by the middle phase: <b>no participant commits until it knows all participants have agreed to commit</b>. So after a coordinator failure a survivor can decide by timeout instead of blocking:</p>
+<ul>
+<li>If a participant has received <code>preCommit</code>, it (and by the invariant, everyone who is still up) may time out and <b>commit</b>.</li>
+<li>If it has not received <code>preCommit</code>, no one can have committed yet, so it may time out and <b>abort</b>.</li>
+</ul>
+<pre>// survivor's decision after the coordinator disappears
+void onCoordinatorTimeout() {
+    if (localState == State.PRE_COMMIT) commit();  // all voted YES -> safe to commit
+    else                                abort();    // nobody could have committed yet
+}</pre>
+<p>An elected recovery coordinator can query the survivors' states and drive them to a single outcome. This is what makes 3PC "non-blocking" in the textbook sense.</p>` },
+    { title: `Why it is rarely used`, body: `<p>3PC's guarantee holds only under a <b>fail-stop model with bounded message delays and no network partitions</b>. Real networks partition, and a partition breaks the argument: two sides can time out into <em>different</em> decisions (one commits, the other aborts), corrupting the transaction — the exact atomicity 2PC was protecting. It also adds a third round trip, worsening latency for a benefit that evaporates precisely when you need it.</p>
+<p>Because of this, production systems that need partition-tolerant agreement do not use 3PC. They rely on <b>consensus protocols (Paxos, Raft, Zab)</b> to agree on the commit decision, or they sidestep distributed commit entirely with <b>sagas</b> and compensations. 3PC is best understood as an instructive stepping stone from 2PC toward consensus, not a tool you reach for.</p>` },
+  ],
+  related: ["two-pc", "saga", "tcc", "quorum"],
 };
 
 export function createSimulation(stage, panel, stageEl) {
-  return sequenceSim(stage, panel, stageEl, {
-    note: "canCommit → preCommit → doCommit.",
-    toggles: [{ key: "crash", label: "Coordinator crashes after preCommit", kind: "warn", value: false }],
-    scenario(ctx) {
-      const crash = ctx.toggles.crash;
-      const actors = [
-        { id: "p1", label: "Wallet DB", color: C.ledger, kind: "db", value: "idle" },
-        { id: "c", label: "Coordinator", color: C.accent },
-        { id: "p2", label: "Inventory DB", color: C.gateway, kind: "db", value: "idle" },
-      ];
-      let steps = [
-        { from: "c", to: "p1", label: "canCommit?", set: { p1: "yes" } },
-        { from: "c", to: "p2", label: "canCommit?", set: { p2: "yes" } },
-        { from: "c", to: "p1", label: "preCommit", set: { p1: "pre-committed" } },
-        { from: "c", to: "p2", label: "preCommit", set: { p2: "pre-committed" } },
-      ];
-      if (!crash) {
-        steps.push({ from: "c", to: "p1", label: "doCommit", good: true, set: { p1: "committed" } },
-                   { from: "c", to: "p2", label: "doCommit", good: true, set: { p2: "committed" } });
-      } else {
-        steps.push({ from: "c", to: "c", label: "✖ crash", self: true, bad: true, set: { c: "DOWN" } },
-                   { from: "p1", to: "p1", label: "timeout → commit", self: true, good: true, set: { p1: "committed" } },
-                   { from: "p2", to: "p2", label: "timeout → commit", self: true, good: true, set: { p2: "committed" } });
-      }
-      return {
-        actors, steps, stepDur: 1.0,
-        status: (r) => !r.done ? { text: "phased commit…", cls: "" }
-          : crash ? { text: "participants committed on timeout — non-blocking", cls: "ok" } : { text: "committed with an extra phase", cls: "ok" },
-      };
-    },
-  });
+  return createTopicSim("three-pc", stage, panel, stageEl);
 }

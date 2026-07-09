@@ -1,91 +1,67 @@
 // @article-v2
-import { sequenceSim } from "../../../sim/sequence.js";
-import { C } from "../../../sim/primitives.js";
+// @sim-lab
+import { createTopicSim } from "../../../sim/lab/registry.js";
 
 export const meta = { id: "optimistic", title: "Optimistic Concurrency", category: "opt-pess" };
 
 export const content = {
-  oneliner: `Version columns + retries.`,
-  archetype: "pattern",
+  oneliner: `Assume conflicts are rare: don't lock, detect a concurrent change at commit time via a version check, and retry the loser.`,
+  archetype: "concept",
   sections: [
-    { title: `Motivation`, body: `<p>Version columns + retries.</p>
-<p>Without <b>Optimistic Concurrency</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>Concurrency control prevents conflicting wallet updates. Row-level locks block concurrent writers; version columns enable optimistic retry; distributed locks (Redis, etcd) coordinate cross-service critical sections with fencing tokens.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Optimistic Concurrency</b>:</p>
+    { title: `The core idea`, body: `<p><b>Optimistic concurrency control (OCC)</b> bets that two transactions rarely touch the same row at the same time. So it takes no locks while a transaction reads and thinks; it only <b>validates at commit</b> that the data it read has not changed underneath it. If nobody else wrote the row, the commit succeeds; if someone did, the transaction is rejected and the caller retries with fresh data.</p>
+<p>This is how it works in practice: reads proceed freely and conflict detection is deferred to the last moment. The cost of a conflict is a wasted attempt plus a retry — cheap when conflicts are rare, wasteful when they are common.</p>` },
+    { title: `How conflict detection works`, body: `<p>The standard mechanism is a <b>version column</b> (or a last-updated timestamp) on the row. The transaction reads the current version, does its work, then issues a <b>compare-and-set</b> update that only applies if the version is unchanged, bumping it atomically:</p>
+<p><code>UPDATE wallet SET balance = :new, version = version + 1 WHERE id = :id AND version = :seen_version;</code></p>
+<p>The database returns the number of rows changed. <b>One row</b> means you won the race; <b>zero rows</b> means another transaction committed first and moved the version — your write applied to nothing, which is the conflict signal. There are no dirty reads and no blocking; correctness comes entirely from the version predicate.</p>` },
+    { title: `The retry loop`, body: `<p>OCC is only safe if the caller handles the zero-row case:</p>
 <ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
+<li>Read the entity and its version.</li>
+<li>Compute the new state.</li>
+<li>Run the CAS update. If one row changed, commit.</li>
+<li>If zero rows changed, re-read the fresh row and repeat, bounded by a max attempt count with jittered backoff.</li>
 </ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Optimistic Concurrency</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Optimistic Concurrency</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Optimistic Concurrency</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<p>ORMs automate the predicate: JPA/Hibernate <code>@Version</code> appends <code>AND version = ?</code> and raises <code>OptimisticLockException</code> when no row matches. Never treat zero rows as success — that is a silent lost update.</p>
+<pre>@Entity
+@Table(name = "wallets")
+public class Wallet {
+    @Id private String id;
+    private long balanceCents;
+    @Version private long version;
+}
+
+@Service
+public class OptimisticWalletService {
+    private final WalletRepository repo;
+    private static final int MAX_RETRIES = 5;
+
+    public void debit(String walletId, long amountCents) {
+        for (int attempt = 0; attempt &lt; MAX_RETRIES; attempt++) {
+            try {
+                debitOnce(walletId, amountCents);
+                return;
+            } catch (OptimisticLockException | OptimisticLockingFailureException e) {
+                backoff(attempt);
+            }
+        }
+        throw new ConcurrencyException("wallet " + walletId);
+    }
+
+    @Transactional
+    void debitOnce(String walletId, long amountCents) {
+        Wallet w = repo.findById(walletId).orElseThrow();
+        if (w.getBalanceCents() &lt; amountCents) {
+            throw new InsufficientFundsException(walletId);
+        }
+        w.setBalanceCents(w.getBalanceCents() - amountCents);
+        repo.save(w); // UPDATE ... WHERE id=? AND version=?
+    }
+}</pre>` },
+    { title: `When to use it`, body: `<p>OCC excels under <b>low to moderate contention</b> and for workloads with a long "think time" you would never want to hold a lock through — a user editing a form, a wizard, distinct wallets each touched by one request. Because readers never block writers and no lock is held across a round trip, throughput is high and there is no deadlock risk.</p>
+<p>It degrades under <b>high contention on a hot row</b>: many transactions read the same version, one wins, the rest fail and retry, and the retries themselves collide — throughput collapses into a livelock of wasted work. That is the regime where <b>pessimistic</b> locking (serialize up front) wins. Pair OCC with an idempotency key so a client's retry after a conflict cannot double-apply the effect.</p>` },
   ],
-  figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Optimistic Concurrency structure">
-<defs><marker id="fig-optimistic-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Optimistic Conc…</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-optimistic-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-optimistic-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-optimistic-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Optimistic Concurrency — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Optimistic Concurrency pattern — components and data flow in Order Service.` }
-  ],
-  related: [],
+  related: ["pessimistic", "hybrid", "optimistic-locking-schema", "lost-update"],
 };
 
 export function createSimulation(stage, panel, stageEl) {
-  return sequenceSim(stage, panel, stageEl, {
-    note: "Versioned writes; the loser retries.",
-    toggles: [{ key: "hi", label: "High contention", kind: "warn", value: false }],
-    scenario(ctx) {
-      const hi = ctx.toggles.hi;
-      const actors = [
-        { id: "w1", label: "Writer 1", color: C.service },
-        { id: "db", label: "row", color: C.ledger, kind: "db", value: "v0=100" },
-        { id: "w2", label: "Writer 2", color: C.gateway },
-      ];
-      let steps;
-      if (!hi) {
-        steps = [
-          { from: "w1", to: "db", label: "read v0=100", set: { w1: "v0" } },
-          { from: "w1", to: "db", label: "commit @v0 → v1=120", good: true, set: { db: "v1=120" } },
-          { from: "w2", to: "db", label: "read v1=120", set: { w2: "v1" } },
-          { from: "w2", to: "db", label: "commit @v1 → v2=150", good: true, set: { db: "v2=150" } },
-        ];
-      } else {
-        steps = [
-          { from: "w1", to: "db", label: "read v0=100", set: { w1: "v0" } },
-          { from: "w2", to: "db", label: "read v0=100", set: { w2: "v0" } },
-          { from: "w1", to: "db", label: "commit @v0 → v1", good: true, set: { db: "v1=120" } },
-          { from: "w2", to: "db", label: "commit @v0 ✕ stale", bad: true, dashed: true, set: { w2: "retry" } },
-          { from: "w2", to: "db", label: "re-read v1, commit → v2", good: true, set: { db: "v2=150", w2: "ok" } },
-        ];
-      }
-      return {
-        actors, steps, stepDur: 1.1,
-        status: (r) => !r.done ? { text: "optimistic writes…", cls: "" }
-          : hi ? { text: "1 conflict → 1 retry (wasted work)", cls: "warn" } : { text: "no locks, no waiting — fast", cls: "ok" },
-      };
-    },
-  });
+  return createTopicSim("optimistic", stage, panel, stageEl);
 }

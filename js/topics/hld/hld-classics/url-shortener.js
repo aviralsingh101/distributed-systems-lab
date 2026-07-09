@@ -1,6 +1,7 @@
 // @article-v2
+// @sim-lab
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
+import { createTopicSim } from "../../../sim/lab/registry.js";
 import { topologyTemplate } from "../../../sim/templates/index.js";
 
 const topic = makeTopic({
@@ -36,56 +37,14 @@ const topic = makeTopic({
 </ul>
 <p>Interview tip: whiteboard the charge flow, mark where <b>URL Shortener</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
   ],
-  figures: [
-    { id: "request-path", svg: `<svg viewBox="0 0 640 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="URL Shortener in request path">
-<defs><marker id="fig-url-shortener-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="10" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="46" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Client</text>
-<rect x="100" y="40" width="88" height="36" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="144" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">URL Shortener</text><text x="144" y="72" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">this topic</text>
-<rect x="206" y="40" width="80" height="36" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
-<text x="246" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Order</text>
-<rect x="304" y="40" width="84" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="346" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Gateway</text>
-<rect x="406" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="442" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger</text>
-<rect x="496" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="532" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Queue</text>
-<line x1="82" y1="58" x2="98" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-url-shortener-arr)"/>
-<line x1="188" y1="58" x2="204" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-url-shortener-arr)"/>
-<line x1="286" y1="58" x2="302" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-url-shortener-arr)"/>
-<line x1="388" y1="58" x2="404" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-url-shortener-arr)"/>
-<line x1="478" y1="58" x2="494" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-url-shortener-arr)"/>
-<text x="320" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">HTTPS request flow — URL Shortener</text>
-</svg>`, caption: `URL Shortener on the payment request path — from client charge to Ledger commit.` }
-  ],
   related: [],
   
   
-  template: "topology",
-  sim: () => ({
-    note: `Explore URL Shortener in the payment platform.`,
-    toggles: [{ key: "fix", label: "Apply URL Shortener", kind: "ok", value: false }],
-    nodes: (ctx) => [
-      { id: "c", x: 160, y: 280, title: "Client", color: C.client },
-      { id: "o", x: 400, y: 200, title: "Order", color: C.service, active: true },
-      { id: "g", x: 640, y: 280, title: "Gateway", color: C.gateway },
-      { id: "l", x: 500, y: 400, title: "Ledger", color: C.ledger, value: ctx.toggles.fix ? "ok" : "?" },
-      { id: "q", x: 840, y: 200, title: "Queue", color: C.queue },
-    ],
-    edges: (ctx) => [
-      { from: "c", to: "o", active: true },
-      { from: "o", to: "g", active: ctx.toggles.fix },
-      { from: "g", to: "l", active: ctx.toggles.fix },
-      { from: "l", to: "q", active: ctx.toggles.fix, label: "URL Shortener" },
-    ],
-    activeEdge: (ctx, t) => ctx.toggles.fix ? { from: "l", to: "q" } : { from: "c", to: "o" },
-    status: (ctx) => ({ text: ctx.toggles.fix ? "URL Shortener in path" : "pattern absent", cls: ctx.toggles.fix ? "ok" : "warn" }),
-  }),
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
+
 export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
+  return createTopicSim("url-shortener", stage, panel, stageEl);
 }

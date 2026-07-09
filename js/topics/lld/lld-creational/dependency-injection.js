@@ -1,7 +1,23 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { layerTemplate } from "../../../sim/templates/index.js";
+
+const DI_SVG = `<svg viewBox="0 0 520 190" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Dependency injection wiring">
+  <defs><marker id="fig-dependency-injection-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
+  <rect x="180" y="18" width="160" height="44" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
+  <text x="260" y="38" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Container / main</text>
+  <text x="260" y="54" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">composition root</text>
+  <rect x="180" y="118" width="160" height="52" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
+  <text x="260" y="140" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">OrderService</text>
+  <text x="260" y="158" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="ui-monospace,monospace">(gateway, ledger)</text>
+  <rect x="20" y="118" width="130" height="44" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
+  <text x="85" y="145" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="ui-monospace,monospace">StripeGateway</text>
+  <rect x="370" y="118" width="130" height="44" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
+  <text x="435" y="145" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="ui-monospace,monospace">SqlLedger</text>
+  <line x1="260" y1="62" x2="260" y2="116" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-dependency-injection-arr)"/>
+  <line x1="150" y1="140" x2="178" y2="140" stroke="#5b9dff" stroke-width="1.4" marker-end="url(#fig-dependency-injection-arr)"/>
+  <line x1="370" y1="140" x2="342" y2="140" stroke="#5b9dff" stroke-width="1.4" marker-end="url(#fig-dependency-injection-arr)"/>
+  <text x="260" y="98" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">injects constructed dependencies</text>
+</svg>`;
 
 const topic = makeTopic({
   id: "dependency-injection",
@@ -10,68 +26,81 @@ const topic = makeTopic({
   track: "lld",
   tier: "essential",
   archetype: "pattern",
-  oneliner: `Inject deps from outside.`,
+  oneliner: `Supply a class's dependencies from outside rather than having it construct or look them up itself, so wiring is centralized and implementations are swappable.`,
   sections: [
-    { title: `Motivation`, body: `<p>Inject deps from outside.</p>
-<p>Without <b>Dependency Injection</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Dependency Injection</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Dependency Injection</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Dependency Injection</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Dependency Injection</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Dependency Injection</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+    { title: `The problem it solves`, body: `<p><b>Dependency Injection (DI)</b> is a technique for achieving Inversion of Control over object creation. A class that does <code>this.gateway = new StripeGateway()</code> in its constructor is tightly bound to that concrete class: you cannot substitute a fake in tests, cannot swap providers by configuration, and cannot see its true dependencies without reading its body.</p>
+<p>DI flips responsibility: the class <em>declares</em> what it needs (as interface-typed parameters) and something external <em>provides</em> the concrete instances. Dependencies become explicit and replaceable.</p>` },
+    { title: `Structure and forms`, figureAfter: "di-uml", body: `<p>Three injection styles exist. <b>Constructor injection</b> passes dependencies as constructor arguments — preferred, because it makes dependencies mandatory and the object immutable and fully-formed once built. <b>Setter/property injection</b> supplies them after construction, useful for optional dependencies.</p>
+<pre>// WITHOUT DI — hidden, untestable dependency
+public class OrderService {
+    private final PaymentGateway gateway = new StripeGateway(new StripeClient("sk_live_..."));
+    private final LedgerRepository ledger = new SqlLedgerRepository(DataSource.getInstance());
+    // dependencies invisible from outside; cannot swap for tests
+}
+
+// WITH DI — constructor injection (preferred)
+public class OrderService {
+    private final PaymentGateway gateway;
+    private final LedgerRepository ledger;
+    private final EventQueue eventQueue;
+
+    public OrderService(PaymentGateway gateway,
+                        LedgerRepository ledger,
+                        EventQueue eventQueue) {
+        this.gateway = gateway;
+        this.ledger = ledger;
+        this.eventQueue = eventQueue;
+    }
+
+    public Order placeOrder(PlaceOrderCommand cmd) {
+        ChargeResult result = gateway.charge(cmd.toChargeRequest());
+        ledger.recordDebit(cmd.walletId(), cmd.amountCents(), result.processorRef());
+        eventQueue.publish(new OrderPlacedEvent(cmd.orderId(), result));
+        return Order.from(cmd, result);
+    }
+}</pre>
+<p>The wiring lives in a <b>composition root</b> — a single place where the object graph is assembled:</p>
+<pre>public class Application {
+    public static void main(String[] args) {
+        // Composition root — the ONLY place that names concrete classes
+        PaymentGateway gateway = new StripeGateway(new StripeClient(env("STRIPE_KEY")));
+        LedgerRepository ledger = new SqlLedgerRepository(hikariDataSource());
+        EventQueue eventQueue = new KafkaEventQueue(kafkaProducer());
+
+        OrderService orderService = new OrderService(gateway, ledger, eventQueue);
+        // run the app with orderService
+    }
+}</pre>` },
+    { title: `Flow`, body: `<p>The steps: (1) define abstractions (<code>PaymentGateway</code>, <code>LedgerRepository</code>, <code>EventQueue</code>). (2) write classes that accept those abstractions in their constructors. (3) in the composition root, construct the concrete implementations and inject them to build the graph. (4) request the top-level object and run.</p>
+<pre>// Test flow — same OrderService, fake dependencies
+@Test
+void placeOrder_recordsDebitAndPublishesEvent() {
+    FakePaymentGateway gateway = new FakePaymentGateway();
+    InMemoryLedger ledger = new InMemoryLedger();
+    InMemoryEventQueue events = new InMemoryEventQueue();
+
+    OrderService svc = new OrderService(gateway, ledger, events);
+    svc.placeOrder(aValidCommand());
+
+    assertThat(ledger.lastDebit()).isNotNull();
+    assertThat(events.published()).hasSize(1);
+}
+
+public final class FakePaymentGateway implements PaymentGateway {
+    @Override
+    public ChargeResult charge(ChargeRequest req) {
+        return new ChargeResult(req.paymentId(), ChargeStatus.CAPTURED, "fake-ref");
+    }
+}</pre>
+<p>Tests reuse the same production classes but inject in-memory fakes — exercising real logic without a network or database.</p>` },
+    { title: `Trade-offs and relationship to DIP`, body: `<p><b>Benefits:</b> testability, swappable implementations, explicit dependencies, and centralized lifecycle management. <b>Costs:</b> more indirection and up-front wiring; heavyweight containers add "magic" that can obscure the object graph and push errors from compile time to startup. For small programs, manual constructor injection in <code>main</code> is often clearer than a framework.</p>
+<p>DI is the usual mechanism that realizes the <b>Dependency Inversion Principle</b>: DIP says depend on abstractions; DI is <em>how</em> the concrete instance behind an abstraction is delivered at runtime. You can have DI without DIP (injecting a concrete class buys testability but not decoupling), and DIP is only fully realized when the abstraction is owned by the client.</p>` },
   ],
   figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Dependency Injection structure">
-<defs><marker id="fig-dependency-injection-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Dependency Inje…</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-dependency-injection-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-dependency-injection-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-dependency-injection-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Dependency Injection — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Dependency Injection pattern — components and data flow in Order Service.` }
+    { id: "di-uml", svg: DI_SVG, caption: `The composition root constructs concrete dependencies and injects them into OrderService, which knows only the abstractions.` },
   ],
-  related: [],
-  
-  
-  template: "layer",
-  sim: () => ({
-    note: `Explore Dependency Injection in the payment platform.`,
-    toggles: [{ key: "fix", label: "Apply layering", kind: "ok", value: false }],
-    layers: (ctx) => [
-      { name: "API", components: [{ title: "REST/gRPC", active: true }] },
-      { name: "Domain", components: [{ title: "Dependency Injection", active: ctx.toggles.fix, color: C.accent }] },
-      { name: "Data", components: [{ title: "Ledger", color: C.ledger }, { title: "Queue", color: C.queue }] },
-    ],
-    status: (ctx) => ({ text: ctx.toggles.fix ? "clean separation" : "logic leaks across layers", cls: ctx.toggles.fix ? "ok" : "err" }),
-  }),
+  related: ["dependency-inversion-principle", "singleton", "factory-method", "abstraction", "interface-segregation-principle"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

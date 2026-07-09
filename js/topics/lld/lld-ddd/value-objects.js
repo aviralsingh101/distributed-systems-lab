@@ -1,7 +1,18 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { dataModelTemplate } from "../../../sim/templates/index.js";
+
+const VO_SVG = `<svg viewBox="0 0 720 170" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Entity identity vs value equality">
+  <rect x="40" y="35" width="290" height="110" rx="10" fill="none" stroke="#5b9dff" stroke-width="1.6"/>
+  <text x="185" y="56" text-anchor="middle" fill="#5b9dff" font-size="11" font-family="system-ui">Entity — equal by ID</text>
+  <rect x="70" y="70" width="100" height="30" rx="5" fill="#1a2236" stroke="#93a1bd" stroke-width="1.3"/><text x="120" y="90" text-anchor="middle" fill="#cdd6e8" font-size="9" font-family="system-ui">Wallet #42</text>
+  <rect x="200" y="70" width="100" height="30" rx="5" fill="#1a2236" stroke="#93a1bd" stroke-width="1.3"/><text x="250" y="90" text-anchor="middle" fill="#cdd6e8" font-size="9" font-family="system-ui">Wallet #42</text>
+  <text x="185" y="125" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">same identity, balance may change</text>
+  <rect x="390" y="35" width="290" height="110" rx="10" fill="none" stroke="#3ddc97" stroke-width="1.6"/>
+  <text x="535" y="56" text-anchor="middle" fill="#3ddc97" font-size="11" font-family="system-ui">Value Object — equal by value</text>
+  <rect x="420" y="70" width="110" height="30" rx="5" fill="#1a2236" stroke="#7c5cff" stroke-width="1.3"/><text x="475" y="90" text-anchor="middle" fill="#cdd6e8" font-size="9" font-family="system-ui">Money(5, USD)</text>
+  <rect x="560" y="70" width="110" height="30" rx="5" fill="#1a2236" stroke="#7c5cff" stroke-width="1.3"/><text x="615" y="90" text-anchor="middle" fill="#cdd6e8" font-size="9" font-family="system-ui">Money(5, USD)</text>
+  <text x="535" y="125" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">interchangeable, immutable, no ID</text>
+</svg>`;
 
 const topic = makeTopic({
   id: "value-objects",
@@ -9,72 +20,77 @@ const topic = makeTopic({
   category: "lld-ddd",
   track: "lld",
   tier: "essential",
-  archetype: "pattern",
-  oneliner: `Immutable defined by attributes.`,
+  archetype: "concept",
+  oneliner: `Immutable objects with no identity, defined entirely by their attributes and compared by value — like Money, DateRange, or Address.`,
   sections: [
-    { title: `Motivation`, body: `<p>Immutable defined by attributes.</p>
-<p>Without <b>Value Objects</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Value Objects</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Value Objects</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Value Objects</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Value Objects</b> changes to production:</p>
+    { title: `Value objects vs entities`, body: `<p>DDD models two kinds of domain objects. An <b>entity</b> has a distinct <b>identity</b> that persists through change: Wallet #42 is the same wallet whether its balance is $10 or $0, and two wallets with identical balances are still different wallets. A <b>value object</b> has <b>no identity</b> — it is defined solely by its attributes. <code>Money(5, USD)</code> is completely interchangeable with any other <code>Money(5, USD)</code>; there is no "which five dollars." You care what it is, not which one it is.</p>` },
+    { title: `The defining properties`, figureAfter: "vo", body: `<p>A value object has three characteristics, and this is how it works in practice:</p>
 <ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
+<li><b>Equality by value:</b> two value objects are equal when all their attributes are equal — you override equals/hashCode (or use a record/data class) to compare fields, not references.</li>
+<li><b>Immutable:</b> once constructed it never changes. To "change" a value you create a new one — <code>money.add(fee)</code> returns a new <code>Money</code> rather than mutating in place, exactly like adding to a number.</li>
+<li><b>Self-validating:</b> it enforces its invariants in the constructor, so an invalid value object cannot exist — a <code>Money</code> rejects a null currency, an <code>Email</code> rejects a malformed string.</li>
 </ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Value Objects</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<pre>// Money value object: immutable, self-validating, equality by value
+public record Money(BigDecimal amount, Currency currency) {
+    public Money {
+        Objects.requireNonNull(amount, "amount");
+        Objects.requireNonNull(currency, "currency");
+        if (amount.scale() &gt; currency.defaultFractionDigits())
+            throw new IllegalArgumentException("too many decimal places for " + currency);
+        if (amount.compareTo(BigDecimal.ZERO) &lt; 0)
+            throw new IllegalArgumentException("amount cannot be negative");
+    }
+
+    public static final Money ZERO = new Money(BigDecimal.ZERO, Currency.getInstance("USD"));
+
+    public Money add(Money other) {
+        requireSameCurrency(other);
+        return new Money(amount.add(other.amount), currency); // new instance, never mutate
+    }
+
+    public Money subtract(Money other) {
+        requireSameCurrency(other);
+        return new Money(amount.subtract(other.amount), currency);
+    }
+
+    private void requireSameCurrency(Money other) {
+        if (!currency.equals(other.currency))
+            throw new IllegalArgumentException("cannot mix " + currency + " and " + other.currency);
+    }
+}</pre>` },
+    { title: `Why they are worth it`, body: `<p>Value objects replace "primitive obsession" — passing amounts as bare <code>BigDecimal</code> and currencies as <code>String</code> — with types that carry meaning and rules. Benefits compound: an <code>Money</code> value object makes it impossible to add USD to EUR by accident, centralizes rounding, and makes method signatures self-documenting (<code>debit(Money amount)</code> not <code>debit(BigDecimal, String)</code>). Immutability makes them <b>free to share and inherently thread-safe</b> — no defensive copying, no synchronization, no risk that some other holder mutates the value under you. And behavior naturally attaches: <code>DateRange.overlaps(other)</code> lives on the value object instead of being duplicated across services.</p>` },
+    { title: `Modeling and persistence`, body: `<p>Look for value objects wherever a concept is really "a bundle of attributes with rules": Money, Address, DateRange, GeoCoordinate, Percentage, an identifier wrapper like <code>WalletId</code>. They typically live <em>inside</em> aggregates as fields of entities. Persistence-wise they are usually <b>embedded</b> in the owning entity's row/columns (or serialized), not given their own table with a surrogate key — giving a value object a database identity quietly turns it back into an entity. The main mistakes: making them mutable (then equality and sharing break), and skipping constructor validation so invalid values slip into the domain.</p>
+<pre>// Identifier wrapper: type-safe, no primitive obsession
+public record PaymentId(String value) {
+    public PaymentId {
+        if (value == null || value.isBlank()) throw new IllegalArgumentException("paymentId required");
+    }
+}
+
+// JPA embeddable — no separate table, no surrogate key
+@Embeddable
+public record EmbeddableMoney(
+    @Column(name = "amount_minor") long amountMinor,
+    @Column(name = "currency_code") String currencyCode
+) {
+    public Money toDomain() {
+        Currency c = Currency.getInstance(currencyCode);
+        return new Money(
+            BigDecimal.valueOf(amountMinor, c.getDefaultFractionDigits()), c);
+    }
+}
+
+// Payment entity embeds Money columns directly
+@Entity
+class PaymentEntity {
+    @Embedded private EmbeddableMoney total;
+}</pre>` },
   ],
   figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Value Objects structure">
-<defs><marker id="fig-value-objects-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Value Objects</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-value-objects-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-value-objects-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-value-objects-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Value Objects — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Value Objects pattern — components and data flow in Order Service.` }
+    { id: "vo", svg: VO_SVG, caption: "Entities are compared by identity and may change; value objects are immutable, have no ID, and are compared by their attributes." },
   ],
-  related: [],
-  
-  
-  template: "dataModel",
-  sim: () => ({
-    note: `Explore Value Objects in the payment platform. — schema view`,
-    toggles: [{ key: "fix", label: "Normalized design", kind: "ok", value: false }],
-    tables: (ctx) => ctx.toggles.fix ? [
-      { name: "payments", cols: [{ name: "id", pk: true }, { name: "wallet_id", fk: true }, { name: "amount" }] },
-      { name: "wallets", cols: [{ name: "id", pk: true }, { name: "balance" }] },
-      { name: "outbox", cols: [{ name: "id", pk: true }, { name: "event", fk: true }] },
-    ] : [
-      { name: "everything", cols: [{ name: "blob", pk: true }, { name: "misc" }] },
-    ],
-    relations: [{ from: "payments", to: "wallets" }],
-    status: (ctx) => ({ text: ctx.toggles.fix ? "schema supports Value Objects" : "schema fights the pattern", cls: ctx.toggles.fix ? "ok" : "warn" }),
-  }),
+  related: ["aggregate-root", "repository-pattern", "layered-architecture"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

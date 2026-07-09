@@ -1,7 +1,5 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { dataModelTemplate } from "../../../sim/templates/index.js";
 
 const topic = makeTopic({
   id: "graphql-schema-design",
@@ -9,77 +7,160 @@ const topic = makeTopic({
   category: "lld-api",
   track: "lld",
   tier: "essential",
-  archetype: "classic",
-  oneliner: `Types, resolvers, and N+1 traps.`,
+  archetype: "pattern",
+  oneliner: `Expose a typed graph of your domain that clients query for exactly the fields they need — powerful for clients, but it moves cost and the N+1 trap onto the server.`,
   sections: [
-    { title: `What is GraphQL Schema Design?`, body: `<p><b>GraphQL Schema Design</b> — Types, resolvers, and N+1 traps.</p>
-<p>In Order Service code, <b>GraphQL Schema Design</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Unlike a generic "best practice" label, it has a specific seat in the payment platform architecture with defined inputs, outputs, and failure modes.</p>` },
-    { title: `How it works`, body: `<p>At runtime, components interact in a defined order with configurable timeouts, health checks, and backoff policies. Trace a single <code>POST /v1/charge</code> with <code>X-Request-ID</code> to see where <b>GraphQL Schema Design</b> applies.</p>
-<p>Configuration lives in infrastructure-as-code (Terraform, Helm) or edge config (nginx, Envoy, Cloudflare). Changes propagate through deploy pipelines — treat config drift as an incident precursor.</p>
-<p>Capacity planning: measure peak QPS, payload size, and fan-out before scaling horizontally. Tail latency (p99) often reveals misconfiguration before mean latency moves.</p>` },
-    { title: `In production`, body: `<p>Operate with dashboards: error rate, p99 latency, saturation, and dependency health. Runbooks cover failover, key rotation, and rollback. Game-day exercises validate that <b>GraphQL Schema Design</b> behaves correctly during AZ failure or broker restart.</p>
-<p>Security: TLS on public paths; no PAN in application logs; audit admin APIs that change <b>GraphQL Schema Design</b> configuration.</p>` },
-    { title: `Common mistakes`, body: `<ul>
-<li>Deploying without measuring the problem the component solves.</li>
-<li>Missing health checks — traffic routes to broken backends until manual intervention.</li>
-<li>Ignoring cache TTL and DNS caching during migrations.</li>
-<li>Operating without correlation IDs across Order → Gateway → Ledger.</li>
-</ul>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>GraphQL Schema Design</b> changes to production:</p>
+    { title: `The model: one typed graph`, body: `<p><b>GraphQL</b> replaces many fixed REST endpoints with a single endpoint and a <b>strongly-typed schema</b> describing your domain as a graph of types and their relationships. Clients send a query naming exactly the fields they want; the server returns exactly that shape. This directly attacks REST's <b>over-fetching</b> (getting fields you don't need) and <b>under-fetching</b> (having to call three endpoints to build one screen) — a mobile client can fetch a payment, its order, and the customer name in one round trip, requesting only the columns it renders.</p>
+<pre>// schema.graphqls — domain types, not table shapes
+type Payment {
+  id: ID!
+  amountMinor: Long!
+  currency: String!
+  status: PaymentStatus!
+  wallet: Wallet!
+  ledgerEntries(first: Int, after: String): LedgerEntryConnection!
+}
+
+type Wallet {
+  id: ID!
+  balanceMinor: Long!
+  currency: String!
+  ownerName: String
+}
+
+type LedgerEntry {
+  id: ID!
+  amountMinor: Long!
+  createdAt: DateTime!
+}
+
+enum PaymentStatus { PENDING CAPTURED DECLINED REFUNDED }
+
+type Query {
+  payment(id: ID!): Payment
+  payments(first: Int!, after: String): PaymentConnection!
+}</pre>` },
+    { title: `Structure: types, operations, resolvers`, body: `<p>Schema design has three moving parts:</p>
 <ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
+<li><b>Types</b> — the nodes of the graph (<code>Payment</code>, <code>Order</code>, <code>Wallet</code>) with fields and edges to other types. Model the domain, not your tables.</li>
+<li><b>Operations</b> — <b>Query</b> (reads), <b>Mutation</b> (writes, run serially), and <b>Subscription</b> (server push over a live channel).</li>
+<li><b>Resolvers</b> — a function per field that knows how to fetch it. A query is executed by walking the tree and invoking each field's resolver.</li>
 </ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>GraphQL Schema Design</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<p>The resolver-per-field model is what makes GraphQL flexible — and is also the source of its signature performance problem.</p>
+<pre>// Spring GraphQL resolver — one method per field
+@Controller
+public class PaymentResolver {
+
+    private final PaymentRepository paymentRepository;
+    private final WalletDataLoader walletLoader;
+
+    public PaymentResolver(PaymentRepository paymentRepository,
+                           WalletDataLoader walletLoader) {
+        this.paymentRepository = paymentRepository;
+        this.walletLoader = walletLoader;
+    }
+
+    @QueryMapping
+    public Payment payment(@Argument String id) {
+        return paymentRepository.findById(id)
+            .orElseThrow(() -&gt; new PaymentNotFoundException(id));
+    }
+
+    // Field resolver: Payment.wallet — batched via DataLoader
+    @SchemaMapping(typeName = "Payment", field = "wallet")
+    public CompletableFuture&lt;Wallet&gt; wallet(Payment payment) {
+        return walletLoader.load(payment.getWalletId());
+    }
+
+    @MutationMapping
+    public Payment chargeWallet(@Argument ChargeInput input) {
+        return paymentRepository.charge(
+            input.walletId(),
+            input.amountMinor(),
+            input.currency(),
+            input.idempotencyKey()
+        );
+    }
+}
+
+public record ChargeInput(
+    String walletId,
+    long amountMinor,
+    String currency,
+    String idempotencyKey
+) {}</pre>` },
+    { title: `The N+1 problem and DataLoader`, body: `<p>Because each field resolves independently, a query like "list 50 payments and each payment's wallet owner" naively runs <b>1 query for the payments + 50 queries for the owners</b> — the <b>N+1 problem</b>. It's easy to write a schema that quietly issues hundreds of database calls per request.</p>
+<p>The standard fix is <b>batching and caching per request</b>, implemented with <b>DataLoader</b>: instead of each resolver hitting the DB, it registers the key it needs; DataLoader collects the keys within a tick and issues one batched query (<code>WHERE wallet_id IN (...)</code>), then hands each resolver its result. This collapses N+1 into 2 queries. Designing resolvers to be batch-friendly is the central discipline of GraphQL server design.</p>
+<pre>// DataLoader: collapse N wallet lookups into one IN query
+@Component
+@Scope(value = "request", proxyMode = ScopedProxyMode.TARGET_CLASS)
+public class WalletDataLoader {
+
+    private final WalletRepository walletRepository;
+    private final DataLoader&lt;String, Wallet&gt; loader;
+
+    public WalletDataLoader(WalletRepository walletRepository) {
+        this.walletRepository = walletRepository;
+        this.loader = DataLoader.newMappedDataLoader(this::batchLoad);
+    }
+
+    public CompletableFuture&lt;Wallet&gt; load(String walletId) {
+        return loader.load(walletId);
+    }
+
+    private CompletableFuture&lt;Map&lt;String, Wallet&gt;&gt; batchLoad(Set&lt;String&gt; walletIds) {
+        return CompletableFuture.supplyAsync(() -&gt;
+            walletRepository.findAllById(walletIds).stream()
+                .collect(Collectors.toMap(Wallet::getId, w -&gt; w))
+        );
+    }
+}
+
+// Ledger entries resolver — same batching pattern
+@SchemaMapping(typeName = "Payment", field = "ledgerEntries")
+public LedgerEntryConnection ledgerEntries(
+        Payment payment,
+        @Argument int first,
+        @Argument String after) {
+    return ledgerEntryRepository.findByPaymentId(payment.getId(), first, after);
+}</pre>` },
+    { title: `Guarding the server and evolving the schema`, body: `<p>Because clients compose arbitrary queries, a malicious or careless query can be catastrophically expensive (deeply nested, huge lists). Protect the server with <b>query depth limits</b>, <b>complexity/cost analysis</b> (budget per query), pagination via <b>Relay-style connections</b> (cursor-based <code>edges</code>/<code>pageInfo</code>) instead of unbounded lists, and persisted/allow-listed queries for public traffic.</p>
+<p>Evolution differs from REST: GraphQL is typically <b>not versioned</b>. You add fields freely and <b>deprecate</b> old ones with <code>@deprecated(reason: ...)</code>, removing them once clients stop using them (analytics on field usage guides this). Errors are also different — a partial response can return <code>data</code> plus an <code>errors</code> array, so clients must handle per-field failure rather than a single HTTP status. Choose GraphQL when diverse clients need flexible, tailored reads over a rich graph; keep it off simple CRUD where REST is lighter.</p>
+<pre>// Relay-style connection for payments — cursor pagination, no unbounded lists
+type PaymentConnection {
+  edges: [PaymentEdge!]!
+  pageInfo: PageInfo!
+}
+
+type PaymentEdge {
+  cursor: String!
+  node: Payment!
+}
+
+type PageInfo {
+  hasNextPage: Boolean!
+  endCursor: String
+}
+
+@QueryMapping
+public PaymentConnection payments(
+        @Argument int first,
+        @Argument String after) {
+    if (first &gt; 100) {
+        throw new GraphQLBadRequestException("first must be &lt;= 100");
+    }
+    return paymentRepository.findConnection(first, after);
+}
+
+// Deprecation — evolve without breaking clients
+type Payment {
+  id: ID!
+  amountMinor: Long!
+  amountCents: Long! @deprecated(reason: "Use amountMinor")
+}</pre>` },
   ],
-  figures: [
-    { id: "request-path", svg: `<svg viewBox="0 0 640 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="GraphQL Schema Design in request path">
-<defs><marker id="fig-graphql-schema-design-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="10" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="46" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Client</text>
-<rect x="100" y="40" width="88" height="36" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="144" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">GraphQL Schem…</text><text x="144" y="72" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">this topic</text>
-<rect x="206" y="40" width="80" height="36" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
-<text x="246" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Order</text>
-<rect x="304" y="40" width="84" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="346" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Gateway</text>
-<rect x="406" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="442" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger</text>
-<rect x="496" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="532" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Queue</text>
-<line x1="82" y1="58" x2="98" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-graphql-schema-design-arr)"/>
-<line x1="188" y1="58" x2="204" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-graphql-schema-design-arr)"/>
-<line x1="286" y1="58" x2="302" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-graphql-schema-design-arr)"/>
-<line x1="388" y1="58" x2="404" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-graphql-schema-design-arr)"/>
-<line x1="478" y1="58" x2="494" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-graphql-schema-design-arr)"/>
-<text x="320" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">HTTPS request flow — GraphQL Schema Design</text>
-</svg>`, caption: `GraphQL Schema Design on the payment request path — from client charge to Ledger commit.` }
-  ],
-  related: [],
-  
-  
-  template: "dataModel",
-  sim: () => ({
-    note: `Explore GraphQL Schema Design in the payment platform. — schema view`,
-    toggles: [{ key: "fix", label: "Normalized design", kind: "ok", value: false }],
-    tables: (ctx) => ctx.toggles.fix ? [
-      { name: "payments", cols: [{ name: "id", pk: true }, { name: "wallet_id", fk: true }, { name: "amount" }] },
-      { name: "wallets", cols: [{ name: "id", pk: true }, { name: "balance" }] },
-      { name: "outbox", cols: [{ name: "id", pk: true }, { name: "event", fk: true }] },
-    ] : [
-      { name: "everything", cols: [{ name: "blob", pk: true }, { name: "misc" }] },
-    ],
-    relations: [{ from: "payments", to: "wallets" }],
-    status: (ctx) => ({ text: ctx.toggles.fix ? "schema supports GraphQL Schema Design" : "schema fights the pattern", cls: ctx.toggles.fix ? "ok" : "warn" }),
-  }),
+  related: ["grpc-service-design", "rest-resource-modeling", "pagination-offset-cursor", "contract-first-vs-code-first", "api-versioning-strategies"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

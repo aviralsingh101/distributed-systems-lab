@@ -1,7 +1,18 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { layerTemplate } from "../../../sim/templates/index.js";
+
+const CLASS_SVG = `<svg viewBox="0 0 460 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Encapsulated Wallet class">
+  <rect x="120" y="20" width="220" height="160" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
+  <text x="230" y="42" text-anchor="middle" fill="#cdd6e8" font-size="13" font-weight="600" font-family="system-ui">Wallet</text>
+  <line x1="120" y1="54" x2="340" y2="54" stroke="#26324a"/>
+  <text x="134" y="76" fill="#ff6b6b" font-size="11" font-family="ui-monospace,monospace">- balanceCents: long</text>
+  <text x="134" y="94" fill="#93a1bd" font-size="10" font-family="system-ui">(private: no outside access)</text>
+  <line x1="120" y1="106" x2="340" y2="106" stroke="#26324a"/>
+  <text x="134" y="128" fill="#3ddc97" font-size="11" font-family="ui-monospace,monospace">+ credit(Money)</text>
+  <text x="134" y="146" fill="#3ddc97" font-size="11" font-family="ui-monospace,monospace">+ debit(Money)</text>
+  <text x="134" y="164" fill="#3ddc97" font-size="11" font-family="ui-monospace,monospace">+ balance(): Money</text>
+  <text x="230" y="196" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">State is guarded; every change goes through a method that enforces invariants</text>
+</svg>`;
 
 const topic = makeTopic({
   id: "encapsulation",
@@ -9,61 +20,102 @@ const topic = makeTopic({
   category: "lld-oop",
   track: "lld",
   tier: "essential",
-  archetype: "pattern",
-  oneliner: `Hide state; expose behavior.`,
+  archetype: "concept",
+  oneliner: `Bundle data with the methods that guard it, and expose behavior instead of raw state so invariants can never be violated from outside.`,
   sections: [
-    { title: `Motivation`, body: `<p>Hide state; expose behavior.</p>
-<p>Without <b>Encapsulation</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>Under network partition, systems choose between strong consistency and availability. Quorum reads/writes use <code>R + W > N</code>. Payment ledgers often favor CP on the primary write path with async replica convergence for analytics.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Encapsulation</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Encapsulation</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Encapsulation</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Encapsulation</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+    { title: `What encapsulation is`, body: `<p><b>Encapsulation</b> bundles a class's data together with the methods that operate on it, and restricts direct access to that data from outside the class. Callers interact through a public interface while the fields stay <code>private</code>. The class becomes the sole guardian of its own <em>invariants</em> — the rules that must always hold, such as "a wallet balance is never negative".</p>
+<p>The goal is not merely hiding fields; it is <b>controlling change</b>. When state can only be mutated through methods, every mutation passes through code you own, so you can validate inputs, keep derived fields consistent, and enforce rules in exactly one place.</p>` },
+    { title: `How it works`, body: `<p>Encapsulation works by combining two mechanisms. First, <b>access control</b> (<code>private</code> fields with <code>public</code> methods) stops outside code from touching the internal representation. Second, a <b>narrow, intent-revealing interface</b> exposes operations like <code>debit(Money)</code> rather than representation-leaking setters like <code>setBalanceCents(long)</code>.</p>
+<p>Because the representation is hidden behind methods, you can change it later — store cents as a <code>long</code> instead of <code>BigDecimal</code>, add an audit log field, or split balance into available vs held — without breaking a single caller. That is the practical payoff: encapsulation decouples the public <em>contract</em> from the private <em>implementation</em>.</p>` },
+    { title: `A concrete example — Wallet`, figureAfter: "wallet-class", body: `<p>In a payment Ledger service, the <code>Wallet</code> aggregate owns the balance invariant. External services never touch the field directly:</p>
+<pre>public final class Wallet {
+    private final String walletId;
+    private long balanceCents;          // private — no getter that exposes mutation
+    private long heldCents;             // TCC Try-phase reservation
+
+    public Wallet(String walletId, long openingBalanceCents) {
+        if (openingBalanceCents &lt; 0) throw new IllegalArgumentException("negative opening balance");
+        this.walletId = walletId;
+        this.balanceCents = openingBalanceCents;
+        this.heldCents = 0;
+    }
+
+    /** Credit available balance. Rejects non-positive amounts. */
+    public void credit(Money amount) {
+        requirePositive(amount);
+        balanceCents += amount.cents();
+    }
+
+    /** Debit available balance. Rejects overdraft. */
+    public void debit(Money amount) {
+        requirePositive(amount);
+        long available = balanceCents - heldCents;
+        if (amount.cents() &gt; available) {
+            throw new InsufficientFundsException(walletId, amount, available);
+        }
+        balanceCents -= amount.cents();
+    }
+
+    /** TCC Try: move funds from available into held (not yet debited). */
+    public void hold(Money amount) {
+        requirePositive(amount);
+        long available = balanceCents - heldCents;
+        if (amount.cents() &gt; available) throw new InsufficientFundsException(walletId, amount, available);
+        heldCents += amount.cents();
+    }
+
+    public Money balance() {
+        return Money.ofCents(balanceCents - heldCents, Currency.USD);
+    }
+
+    private static void requirePositive(Money amount) {
+        if (amount.cents() &lt;= 0) throw new IllegalArgumentException("amount must be positive");
+    }
+}</pre>
+<p>No controller, saga step, or test can set <code>balanceCents = -500</code> because the field is private and there is no public setter. The overdraft check lives in exactly one place — inside <code>debit</code> and <code>hold</code>.</p>` },
+    { title: `What breaks encapsulation — anemic models`, body: `<p>The opposite of encapsulation is an <b>anemic domain model</b>: a class with public getters and setters for every field, and all business logic in separate "service" classes.</p>
+<pre>// ANEMIC — logic scattered, invariants unenforced
+public class AnemicWallet {
+    private long balanceCents;
+    public long getBalanceCents() { return balanceCents; }
+    public void setBalanceCents(long v) { this.balanceCents = v; }  // anyone can set anything
+}
+
+// Service layer must remember every rule — easy to forget one code path
+public class WalletService {
+    public void charge(String walletId, Money amount) {
+        AnemicWallet w = repo.find(walletId);
+        if (amount.cents() &gt; w.getBalanceCents()) throw new InsufficientFundsException(...);
+        w.setBalanceCents(w.getBalanceCents() - amount.cents());  // duplicated invariant
+        repo.save(w);
+    }
+}</pre>
+<p>Every new code path that touches <code>setBalanceCents</code> must re-implement the overdraft check. A batch job, a migration script, or a new API endpoint can skip it. Encapsulation moves the invariant <em>into</em> the object that owns the data.</p>` },
+    { title: `Defensive encapsulation — leaking mutable state`, body: `<p>Even with <code>private</code> fields, you can leak the representation by returning mutable internals:</p>
+<pre>public class PaymentBatch {
+    private final List&lt;String&gt; paymentIds = new ArrayList&lt;&gt;();
+
+    // LEAK: caller can mutate our internal list
+    public List&lt;String&gt; getPaymentIds() { return paymentIds; }
+
+    // FIX: return an unmodifiable view
+    public List&lt;String&gt; paymentIds() {
+        return Collections.unmodifiableList(paymentIds);
+    }
+
+    public void addPayment(String id) {
+        paymentIds.add(id);  // only we control mutation
+    }
+}</pre>
+<p>Returning <code>Collections.unmodifiableList</code> or a copy preserves encapsulation: callers can read but cannot add or remove entries behind your back. The same rule applies to exposing internal <code>Map</code>s, arrays, and JPA-managed collections.</p>` },
+    { title: `Pitfalls and limits`, body: `<p>Encapsulation is representation hiding for <em>maintainability</em>, not a security boundary. Java reflection (<code>setAccessible(true)</code>) or serialization frameworks can reach private fields — do not rely on encapsulation alone for security-sensitive data (use encryption at rest, access controls).</p>
+<p>In distributed systems, encapsulation is <b>per JVM</b>. Two Order Service pods each hold their own in-memory state; wallet balance belongs in the Ledger database, not in a Singleton field. Encapsulation governs how one process structures its objects; persistence and consensus govern cross-process correctness.</p>` },
   ],
   figures: [
-    { id: "cap-triangle", svg: `<svg viewBox="0 0 300 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="CAP theorem">
-<polygon points="150,25 40,135 260,135" fill="none" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="150" y="20" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Consistency</text>
-<text x="30" y="150" fill="#cdd6e8" font-size="11" font-family="system-ui">Availability</text>
-<text x="230" y="150" fill="#cdd6e8" font-size="11" font-family="system-ui">Partition</text>
-<text x="150" y="100" text-anchor="middle" fill="#ff5c6c" font-size="10" font-family="system-ui">pick 2 under partition</text>
-</svg>`, caption: `CAP: under partition, choose Consistency or Availability — not both.` }
+    { id: "wallet-class", svg: CLASS_SVG, caption: `Wallet exposes credit/debit/balance but hides balanceCents and heldCents. Every mutation is forced through a method that checks the invariant.` },
   ],
-  related: [],
-  
-  
-  template: "layer",
-  sim: () => ({
-    note: `Explore Encapsulation in the payment platform.`,
-    toggles: [{ key: "fix", label: "Apply layering", kind: "ok", value: false }],
-    layers: (ctx) => [
-      { name: "API", components: [{ title: "REST/gRPC", active: true }] },
-      { name: "Domain", components: [{ title: "Encapsulation", active: ctx.toggles.fix, color: C.accent }] },
-      { name: "Data", components: [{ title: "Ledger", color: C.ledger }, { title: "Queue", color: C.queue }] },
-    ],
-    status: (ctx) => ({ text: ctx.toggles.fix ? "clean separation" : "logic leaks across layers", cls: ctx.toggles.fix ? "ok" : "err" }),
-  }),
+  related: ["abstraction", "single-responsibility-principle", "inheritance-pitfalls", "value-objects"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

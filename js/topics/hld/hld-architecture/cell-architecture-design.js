@@ -1,6 +1,5 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
 import { topologyTemplate } from "../../../sim/templates/index.js";
 
 const topic = makeTopic({
@@ -36,33 +35,13 @@ const topic = makeTopic({
 </ul>
 <p>Interview tip: whiteboard the charge flow, mark where <b>Cell Architecture (design)</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
   ],
+  figures: [
+    { id: "architecture", svg: `<svg viewBox="0 0 460 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Cell Architecture (design) architecture"> <text x="230" y="18" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">System components</text> <rect x="30" y="40" width="120" height="44" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/> <text x="90" y="66" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Client</text> <rect x="170" y="40" width="120" height="44" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/> <text x="230" y="66" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">API</text> <rect x="310" y="40" width="120" height="44" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/> <text x="370" y="66" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">DB</text> <rect x="30" y="95" width="120" height="44" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/> <text x="90" y="121" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Cache</text> <rect x="170" y="95" width="120" height="44" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/> <text x="230" y="121" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Queue</text> </svg>`, caption: `Cell Architecture (design): high-level components and data flow for the system design.` },
+  ],
   related: ["cell-architecture"],
   
   
-  template: "topology",
-  sim: () => ({
-    note: `Explore Cell Architecture (design) in the payment platform.`,
-    toggles: [{ key: "fix", label: "Apply Cell Architecture (design)", kind: "ok", value: false }],
-    nodes: (ctx) => [
-      { id: "c", x: 160, y: 280, title: "Client", color: C.client },
-      { id: "o", x: 400, y: 200, title: "Order", color: C.service, active: true },
-      { id: "g", x: 640, y: 280, title: "Gateway", color: C.gateway },
-      { id: "l", x: 500, y: 400, title: "Ledger", color: C.ledger, value: ctx.toggles.fix ? "ok" : "?" },
-      { id: "q", x: 840, y: 200, title: "Queue", color: C.queue },
-    ],
-    edges: (ctx) => [
-      { from: "c", to: "o", active: true },
-      { from: "o", to: "g", active: ctx.toggles.fix },
-      { from: "g", to: "l", active: ctx.toggles.fix },
-      { from: "l", to: "q", active: ctx.toggles.fix, label: "Cell Architecture (design)" },
-    ],
-    activeEdge: (ctx, t) => ctx.toggles.fix ? { from: "l", to: "q" } : { from: "c", to: "o" },
-    status: (ctx) => ({ text: ctx.toggles.fix ? "Cell Architecture (design) in path" : "pattern absent", cls: ctx.toggles.fix ? "ok" : "warn" }),
-  }),
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

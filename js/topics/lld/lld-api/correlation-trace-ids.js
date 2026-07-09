@@ -1,7 +1,7 @@
 // @article-v2
+// @sim-lab
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { flowTemplate } from "../../../sim/templates/index.js";
+import { createTopicSim } from "../../../sim/lab/registry.js";
 
 const topic = makeTopic({
   id: "correlation-trace-ids",
@@ -10,85 +10,136 @@ const topic = makeTopic({
   track: "lld",
   tier: "essential",
   archetype: "pattern",
-  oneliner: `Follow one request end-to-end.`,
+  oneliner: `Stamp every request with an ID that flows through every service, log line, and message so you can reconstruct one request's whole journey across a distributed system.`,
   sections: [
-    { title: `Motivation`, body: `<p>Follow one request end-to-end.</p>
-<p>Without <b>Correlation / Trace IDs</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Correlation / Trace IDs</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Correlation / Trace IDs</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Correlation / Trace IDs</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Correlation / Trace IDs</b> changes to production:</p>
+    { title: `Why you need them`, body: `<p>In a monolith, one request is one thread and one log stream — easy to follow. In a distributed system, a single <code>POST /v1/charge</code> fans out across the <b>Order Service</b>, <b>Payment Gateway</b>, <b>Ledger</b>, and <b>Event Queue</b>, each on different hosts writing to different logs, interleaved with thousands of other requests. Without a shared identifier you cannot tell which log lines belong to <em>this</em> charge. <b>Correlation and trace IDs</b> are the thread you pull to reassemble that story.</p>
+<pre>// Request context — one ID per logical charge
+public final class RequestContext {
+    private static final ThreadLocal&lt;String&gt; CORRELATION_ID = new ThreadLocal&lt;&gt;();
+    private static final ThreadLocal&lt;String&gt; TRACE_ID = new ThreadLocal&lt;&gt;();
+
+    public static void set(String correlationId, String traceId) {
+        CORRELATION_ID.set(correlationId);
+        TRACE_ID.set(traceId);
+    }
+
+    public static String correlationId() {
+        return CORRELATION_ID.get();
+    }
+
+    public static void clear() {
+        CORRELATION_ID.remove();
+        TRACE_ID.remove();
+    }
+}</pre>` },
+    { title: `Correlation ID vs trace/span`, body: `<p>Two related but distinct concepts:</p>
 <ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
+<li><b>Correlation ID</b> — one opaque ID that identifies a single logical request/transaction end to end. Attach it to every log line and propagate it to every downstream call so all work for that request shares one key.</li>
+<li><b>Trace ID + span IDs</b> (distributed tracing) — a <b>trace ID</b> identifies the whole request tree, while each hop creates a <b>span</b> (with its own span ID and a parent span ID) capturing timing. Spans reconstruct not just <em>what</em> happened but the causal tree and where the latency went.</li>
 </ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Correlation / Trace IDs</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<p>A correlation ID gives you groupable logs; tracing gives you a timed, hierarchical waterfall. Modern stacks standardize both via the <b>W3C <code>traceparent</code></b> header and OpenTelemetry.</p>
+<pre>// W3C traceparent: 00-{trace-id}-{parent-span-id}-{flags}
+// Example: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+
+@Component
+public class TraceContextFilter extends OncePerRequestFilter {
+
+    private static final String TRACEPARENT = "traceparent";
+    private static final String REQUEST_ID = "X-Request-ID";
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request,
+                                    HttpServletResponse response,
+                                    FilterChain chain) throws ServletException, IOException {
+        String correlationId = Optional.ofNullable(request.getHeader(REQUEST_ID))
+            .filter(s -&gt; !s.isBlank())
+            .orElseGet(() -&gt; UUID.randomUUID().toString());
+
+        String traceparent = request.getHeader(TRACEPARENT);
+        String traceId = parseTraceId(traceparent).orElse(correlationId);
+
+        RequestContext.set(correlationId, traceId);
+        MDC.put("correlation_id", correlationId);
+        MDC.put("trace_id", traceId);
+
+        response.setHeader(REQUEST_ID, correlationId);
+        try {
+            chain.doFilter(request, response);
+        } finally {
+            RequestContext.clear();
+            MDC.clear();
+        }
+    }
+}</pre>` },
+    { title: `Implementation flow`, body: `<ol>
+<li><b>Generate or accept at the edge</b> — the gateway/first service reads an inbound <code>X-Request-ID</code>/<code>traceparent</code> if present (trust boundaries permitting) or generates a new one.</li>
+<li><b>Store in context</b> — put the ID in a request-scoped context (thread-local, async-local, or the tracing context) so any code can read it without threading it through every function signature.</li>
+<li><b>Inject into logs</b> — a logging filter adds the ID to every structured log entry automatically.</li>
+<li><b>Propagate outward</b> — HTTP clients add the header on every outbound call; message producers stamp it into message headers so <b>async</b> consumers keep the same ID (tracing across the queue, not just synchronous calls).</li>
+</ol>
+<pre>// Outbound HTTP client — propagate headers to Payment Gateway
+@Component
+public class TracingRestClientInterceptor implements ClientHttpRequestInterceptor {
+
+    @Override
+    public ClientHttpResponse intercept(HttpRequest request, byte[] body,
+            ClientHttpRequestExecution execution) throws IOException {
+        String correlationId = RequestContext.correlationId();
+        if (correlationId != null) {
+            request.getHeaders().set("X-Request-ID", correlationId);
+        }
+        return execution.execute(request, body);
+    }
+}
+
+// Payment service logs with automatic MDC injection
+@Service
+public class PaymentService {
+
+    private static final Logger log = LoggerFactory.getLogger(PaymentService.class);
+
+    public PaymentResponse charge(CreatePaymentRequest req) {
+        log.info("charging wallet={} amount={}", req.walletId(), req.amountMinor());
+        // log output: {"correlation_id":"abc-123","msg":"charging wallet=w-7 amount=5000"}
+        return paymentGateway.charge(req);
+    }
+}</pre>` },
+    { title: `Getting it right in production`, body: `<p>The pattern only pays off if propagation is <b>complete</b> — one service that drops the header breaks the chain and you lose the trail exactly where an incident often hides. Enforce it in shared middleware/interceptors rather than relying on each team.</p>
+<p>Practical notes: make IDs high-entropy and collision-resistant (UUID/ULID); include the correlation ID in <b>error responses</b> so a user can quote it to support; keep IDs opaque and non-sensitive (never encode PII); and remember async — the biggest gap is usually forgetting to carry the ID through the Event Queue into consumers. With IDs everywhere, debugging a failed payment becomes a single log query instead of a cross-team archaeology dig.</p>
+<pre>// Async: stamp correlation ID into Kafka message headers
+@Service
+public class PaymentEventPublisher {
+
+    private final KafkaTemplate&lt;String, PaymentCapturedEvent&gt; kafka;
+
+    public void publish(PaymentCapturedEvent event) {
+        String correlationId = RequestContext.correlationId();
+        ProducerRecord&lt;String, PaymentCapturedEvent&gt; record =
+            new ProducerRecord&lt;&gt;("payments.captured", event.paymentId(), event);
+        if (correlationId != null) {
+            record.headers().add("X-Request-ID",
+                correlationId.getBytes(StandardCharsets.UTF_8));
+        }
+        kafka.send(record);
+    }
+}
+
+// Error response includes trace_id for support lookup
+@ExceptionHandler(PaymentDeclinedException.class)
+public ProblemDetail handleDecline(PaymentDeclinedException ex) {
+    ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+        HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage());
+    problem.setProperty("code", "payment_declined");
+    problem.setProperty("trace_id", RequestContext.correlationId());
+    return problem;
+}</pre>` },
   ],
-  figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Correlation / Trace IDs structure">
-<defs><marker id="fig-correlation-trace-ids-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Correlation / T…</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-correlation-trace-ids-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-correlation-trace-ids-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-correlation-trace-ids-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Correlation / Trace IDs — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Correlation / Trace IDs pattern — components and data flow in Order Service.` }
-  ],
-  related: [],
-  
-  
-  template: "flow",
-  sim: () => ({
-    note: `Explore Correlation / Trace IDs in the payment platform.`,
-    toggles: [{ key: "fix", label: "Apply Correlation / Trace IDs", kind: "ok", value: false }],
-    scenario(ctx) {
-      const fix = ctx.toggles.fix;
-      const actors = [
-        { id: "client", label: "Client", color: C.client },
-        { id: "order", label: "Order Service", color: C.service },
-        { id: "ledger", label: "Ledger", color: C.ledger, kind: "db", value: "balance" },
-        { id: "queue", label: "Event Queue", color: C.queue },
-      ];
-      const steps = fix ? [
-        { from: "client", to: "order", label: "pay", good: true },
-        { from: "order", to: "ledger", label: "Correlation / Trace IDs ✓", good: true, set: { ledger: "committed" } },
-        { from: "ledger", to: "queue", label: "event", good: true },
-      ] : [
-        { from: "client", to: "order", label: "pay" },
-        { from: "order", to: "ledger", label: "naive write", bad: true, set: { ledger: "risk" } },
-        { from: "order", to: "queue", label: "dual write?", dashed: true, bad: true },
-      ];
-      return {
-        actors, steps, stepDur: 1.2,
-        status: (r) => !r.done ? { text: "processing…", cls: "" }
-          : fix ? { text: "Correlation / Trace IDs applied", cls: "ok" } : { text: "pattern missing", cls: "err" },
-      };
-    },
-  }),
+  related: ["error-contract-design", "request-reply", "api-idempotency", "rest-resource-modeling", "pub-sub-pattern"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
+
 export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
+  return createTopicSim("correlation-trace-ids", stage, panel, stageEl);
 }

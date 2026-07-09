@@ -1,7 +1,25 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { layerTemplate } from "../../../sim/templates/index.js";
+
+const POLY_SVG = `<svg viewBox="0 0 500 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Dynamic dispatch through a Notifier interface">
+  <defs><marker id="fig-polymorphism-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
+  <rect x="20" y="80" width="130" height="46" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
+  <text x="85" y="100" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">OrderService</text>
+  <text x="85" y="117" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="ui-monospace,monospace">n.send(msg)</text>
+  <rect x="190" y="80" width="130" height="46" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
+  <text x="255" y="100" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">&lt;&lt;Notifier&gt;&gt;</text>
+  <text x="255" y="117" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="ui-monospace,monospace">send(msg)</text>
+  <rect x="370" y="20" width="110" height="40" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
+  <text x="425" y="44" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">EmailNotifier</text>
+  <rect x="370" y="85" width="110" height="40" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
+  <text x="425" y="109" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">SmsNotifier</text>
+  <rect x="370" y="150" width="110" height="40" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
+  <text x="425" y="174" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">PushNotifier</text>
+  <line x1="150" y1="103" x2="188" y2="103" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-polymorphism-arr)"/>
+  <line x1="320" y1="98" x2="368" y2="44" stroke="#93a1bd" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <line x1="320" y1="103" x2="368" y2="105" stroke="#93a1bd" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <line x1="320" y1="108" x2="368" y2="168" stroke="#93a1bd" stroke-width="1.2" stroke-dasharray="4 3"/>
+</svg>`;
 
 const topic = makeTopic({
   id: "polymorphism",
@@ -9,69 +27,125 @@ const topic = makeTopic({
   category: "lld-oop",
   track: "lld",
   tier: "essential",
-  archetype: "pattern",
-  oneliner: `One interface, many implementations.`,
+  archetype: "concept",
+  oneliner: `Let one call site invoke behavior that varies by the runtime type of the object, so callers stay ignorant of the concrete implementation.`,
   sections: [
-    { title: `Motivation`, body: `<p>One interface, many implementations.</p>
-<p>Without <b>Polymorphism</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Polymorphism</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Polymorphism</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Polymorphism</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Polymorphism</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Polymorphism</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+    { title: `What polymorphism is`, body: `<p><b>Polymorphism</b> ("many forms") lets a single interface stand for several underlying types. The most important kind in OOP is <b>subtype polymorphism</b>: a variable typed as <code>PaymentNotifier</code> may hold an <code>EmailNotifier</code> or an <code>SmsNotifier</code>, and calling <code>notify()</code> runs the method belonging to the actual object at runtime.</p>
+<p>Abstraction defines the contract; polymorphism is the mechanism that picks the correct implementation of that contract without the caller branching on type. Together they let you add a new notification channel by writing one new class, not by editing every call site.</p>` },
+    { title: `How it works — dynamic dispatch`, figureAfter: "notifier-dispatch", body: `<p>Subtype polymorphism works by <b>dynamic dispatch</b> (virtual method invocation in the JVM). Each object carries a reference to its class's method table. A call such as <code>notifier.notify(event)</code> is resolved at runtime by looking up <code>notify</code> in the object's actual class — not the declared type of the variable. The same bytecode call site therefore executes different code depending on which object was injected.</p>
+<pre>// The abstraction — one method, many forms
+public interface PaymentNotifier {
+    void notify(PaymentCapturedEvent event);
+}
+
+public record PaymentCapturedEvent(String paymentId, String walletId, Money amount) {}
+
+// Concrete forms — each implements notify differently
+public final class EmailNotifier implements PaymentNotifier {
+    private final JavaMailSender mailSender;
+
+    @Override
+    public void notify(PaymentCapturedEvent event) {
+        mailSender.send(buildReceiptEmail(event.walletId(), event.amount()));
+    }
+}
+
+public final class SmsNotifier implements PaymentNotifier {
+    private final TwilioClient twilio;
+
+    @Override
+    public void notify(PaymentCapturedEvent event) {
+        twilio.messages().create("Payment of " + event.amount() + " captured.");
+    }
+}
+
+public final class PushNotifier implements PaymentNotifier {
+    private final FcmClient fcm;
+
+    @Override
+    public void notify(PaymentCapturedEvent event) {
+        fcm.send(event.walletId(), "Payment confirmed", event.paymentId());
+    }
+}</pre>
+<p>All three classes share the same method signature but different bodies. The JVM picks the right <code>notify</code> implementation when the call executes — no <code>if (type == EMAIL)</code> chain in the caller.</p>` },
+    { title: `The caller — one loop, no type checks`, body: `<p><code>OrderService</code> holds a <code>List&lt;PaymentNotifier&gt;</code> injected at startup. After a successful charge it broadcasts to every channel without knowing which implementations are wired:</p>
+<pre>public class OrderService {
+    private final List&lt;PaymentNotifier&gt; notifiers;  // polymorphic list
+    private final PaymentGateway gateway;
+    private final LedgerRepository ledger;
+
+    public OrderService(List&lt;PaymentNotifier&gt; notifiers,
+                        PaymentGateway gateway,
+                        LedgerRepository ledger) {
+        this.notifiers = notifiers;
+        this.gateway = gateway;
+        this.ledger = ledger;
+    }
+
+    @Transactional
+    public void capturePayment(String paymentId, String walletId, Money amount) {
+        ChargeResult result = gateway.charge(new ChargeRequest(paymentId, walletId, amount, ...));
+        if (result.status() != ChargeStatus.CAPTURED) return;
+
+        ledger.recordDebit(walletId, amount, result.processorRef());
+
+        PaymentCapturedEvent event = new PaymentCapturedEvent(paymentId, walletId, amount);
+        for (PaymentNotifier notifier : notifiers) {
+            notifier.notify(event);   // dynamic dispatch — Email, Sms, or Push at runtime
+        }
+    }
+}
+
+// Spring wires all PaymentNotifier beans into the list automatically
+@Configuration
+public class NotifierConfig {
+    @Bean List&lt;PaymentNotifier&gt; notifiers(EmailNotifier email, SmsNotifier sms, PushNotifier push) {
+        return List.of(email, sms, push);
+    }
+}</pre>
+<p>Adding a Slack notifier means writing <code>SlackNotifier implements PaymentNotifier</code> and registering it as a Spring bean — <code>OrderService</code> never changes. That is the Open/Closed Principle in action, enabled by polymorphism.</p>` },
+    { title: `Parametric polymorphism — generics`, body: `<p>Java's second major form is <b>parametric polymorphism</b> via generics. You write code once over a type parameter; the compiler enforces type safety at compile time (no casts, no <code>ClassCastException</code> at runtime for well-typed code).</p>
+<pre>// One repository interface works for any aggregate type
+public interface Repository&lt;T, ID&gt; {
+    Optional&lt;T&gt; findById(ID id);
+    T save(T entity);
+    void delete(T entity);
+}
+
+public class JpaWalletRepository implements Repository&lt;Wallet, String&gt; {
+    @PersistenceContext private EntityManager em;
+
+    @Override public Optional&lt;Wallet&gt; findById(String id) {
+        return Optional.ofNullable(em.find(Wallet.class, id));
+    }
+    @Override public Wallet save(Wallet wallet) { return em.merge(wallet); }
+    @Override public void delete(Wallet wallet) { em.remove(wallet); }
+}
+
+public class JpaPaymentRepository implements Repository&lt;Payment, String&gt; {
+    // same interface, different T — compile-time type safety
+}</pre>
+<p>Generics give polymorphism over <em>structure</em> (the same algorithm for any type) while interfaces give polymorphism over <em>behavior</em> (different algorithms behind the same method name). Production code uses both constantly.</p>` },
+    { title: `Pitfalls`, body: `<p>Polymorphism only pays off when subtypes are truly substitutable — that is the Liskov Substitution Principle. A subtype that throws <code>UnsupportedOperationException</code> for a contract method, or narrows accepted inputs, breaks callers that trusted the interface.</p>
+<pre>// LSP VIOLATION — callers expect notify() to always work
+public class DisabledSmsNotifier implements PaymentNotifier {
+    @Override
+    public void notify(PaymentCapturedEvent event) {
+        throw new UnsupportedOperationException("SMS disabled in this region");
+    }
+}
+
+// BETTER — no-op or filter at wiring time, not at runtime surprise
+public final class NoOpSmsNotifier implements PaymentNotifier {
+    @Override public void notify(PaymentCapturedEvent event) { /* intentionally empty */ }
+}</pre>
+<p>Also beware calling overridable methods from a constructor (subclass override may run before subclass fields initialize), and replacing every <code>switch</code> with a class hierarchy when the case set is small and closed — a well-written <code>switch</code> on an enum is often clearer than seven strategy classes for seven payment statuses.</p>` },
   ],
   figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Polymorphism structure">
-<defs><marker id="fig-polymorphism-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Polymorphism</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-polymorphism-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-polymorphism-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-polymorphism-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Polymorphism — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Polymorphism pattern — components and data flow in Order Service.` }
+    { id: "notifier-dispatch", svg: POLY_SVG, caption: `OrderService calls notify() on the PaymentNotifier interface; dynamic dispatch routes to Email, Sms, or Push at runtime.` },
   ],
-  related: [],
-  
-  
-  template: "layer",
-  sim: () => ({
-    note: `Explore Polymorphism in the payment platform.`,
-    toggles: [{ key: "fix", label: "Apply layering", kind: "ok", value: false }],
-    layers: (ctx) => [
-      { name: "API", components: [{ title: "REST/gRPC", active: true }] },
-      { name: "Domain", components: [{ title: "Polymorphism", active: ctx.toggles.fix, color: C.accent }] },
-      { name: "Data", components: [{ title: "Ledger", color: C.ledger }, { title: "Queue", color: C.queue }] },
-    ],
-    status: (ctx) => ({ text: ctx.toggles.fix ? "clean separation" : "logic leaks across layers", cls: ctx.toggles.fix ? "ok" : "err" }),
-  }),
+  related: ["abstraction", "liskov-substitution-principle", "open-closed-principle", "strategy"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

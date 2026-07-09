@@ -1,7 +1,5 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { dataModelTemplate } from "../../../sim/templates/index.js";
 
 const topic = makeTopic({
   id: "rest-resource-modeling",
@@ -10,71 +8,147 @@ const topic = makeTopic({
   track: "lld",
   tier: "essential",
   archetype: "pattern",
-  oneliner: `Nouns, verbs, and status codes.`,
+  oneliner: `Model your API as nouns (resources) addressed by URIs and manipulated with a small set of HTTP verbs and status codes — not as RPC verbs in the path.`,
   sections: [
-    { title: `Motivation`, body: `<p>Nouns, verbs, and status codes.</p>
-<p>Without <b>REST Resource Modeling</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>REST Resource Modeling</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>REST Resource Modeling</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>REST Resource Modeling</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>REST Resource Modeling</b> changes to production:</p>
+    { title: `Resources, not actions`, body: `<p><b>REST resource modeling</b> means designing your API around <b>nouns</b> — the things in your domain — and letting HTTP methods supply the verbs. A resource is anything worth a URI: a payment, an order, a wallet. You expose <code>/payments/123</code>, not <code>/getPayment?id=123</code> or <code>/createPaymentAndCharge</code>. The URI names the thing; the method says what to do to it.</p>
+<p>Model both <b>collections</b> (<code>/payments</code>) and <b>instances</b> (<code>/payments/123</code>), and nest to show relationships (<code>/orders/45/payments</code>). Keep paths as plural nouns, lowercase, hierarchical, and free of verbs — the resistance to naming an endpoint <code>/doCharge</code> is the whole discipline.</p>
+<pre>// Resource DTOs — nouns, not verbs
+public record PaymentResponse(
+    String id,
+    String walletId,
+    long amountMinor,
+    String currency,
+    PaymentStatus status,
+    Instant createdAt
+) {}
+
+public record CreatePaymentRequest(
+    String walletId,
+    long amountMinor,
+    String currency
+) {}
+
+public enum PaymentStatus { PENDING, CAPTURED, DECLINED, REFUNDED }</pre>` },
+    { title: `Methods and their semantics`, body: `<p>The verbs carry contractual guarantees clients and proxies rely on:</p>
 <ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
+<li><b>GET</b> — read; <b>safe</b> (no side effects) and <b>idempotent</b>. Cacheable.</li>
+<li><b>PUT</b> — replace/create at a known URI; <b>idempotent</b> (repeating it yields the same state).</li>
+<li><b>PATCH</b> — partial update; not guaranteed idempotent.</li>
+<li><b>DELETE</b> — remove; idempotent (deleting twice leaves it deleted).</li>
+<li><b>POST</b> — create a subordinate resource or trigger processing; <b>neither safe nor idempotent</b> — this is why <code>POST /payments</code> needs an idempotency key.</li>
 </ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>REST Resource Modeling</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<p>Because POST is not idempotent, creating a charge (<code>POST /orders/45/payments</code>) can double-charge on retry unless you add an <code>Idempotency-Key</code>. GET/PUT/DELETE can be retried safely by design.</p>
+<pre>@RestController
+@RequestMapping("/v1")
+public class PaymentResourceController {
+
+    private final PaymentService paymentService;
+
+    public PaymentResourceController(PaymentService paymentService) {
+        this.paymentService = paymentService;
+    }
+
+    // GET /v1/payments/{id} — safe, idempotent, cacheable
+    @GetMapping("/payments/{id}")
+    public ResponseEntity&lt;PaymentResponse&gt; getPayment(@PathVariable String id) {
+        return paymentService.findById(id)
+            .map(ResponseEntity::ok)
+            .orElse(ResponseEntity.notFound().build());
+    }
+
+    // POST /v1/orders/{orderId}/payments — NOT idempotent; needs Idempotency-Key
+    @PostMapping("/orders/{orderId}/payments")
+    public ResponseEntity&lt;PaymentResponse&gt; createPayment(
+            @PathVariable String orderId,
+            @RequestBody CreatePaymentRequest body,
+            @RequestHeader("Idempotency-Key") String idempotencyKey) {
+        PaymentResponse created = paymentService.charge(orderId, body, idempotencyKey);
+        URI location = URI.create("/v1/payments/" + created.id());
+        return ResponseEntity.created(location).body(created);
+    }
+
+    // DELETE /v1/payments/{id} — idempotent; second call is still 204
+    @DeleteMapping("/payments/{id}")
+    public ResponseEntity&lt;Void&gt; voidPayment(@PathVariable String id) {
+        paymentService.voidPayment(id);
+        return ResponseEntity.noContent().build();
+    }
+}</pre>` },
+    { title: `Status codes that mean something`, body: `<p>Return codes that let a client act without parsing prose:</p>
+<ul>
+<li><b>200 OK</b> — success with a body; <b>201 Created</b> — resource made, with a <code>Location</code> header; <b>202 Accepted</b> — async work queued; <b>204 No Content</b> — success, empty body.</li>
+<li><b>400</b> malformed request; <b>401</b> unauthenticated; <b>403</b> authenticated but forbidden; <b>404</b> not found; <b>409 Conflict</b> — state clash (e.g. already captured); <b>422</b> valid syntax but failing business rules.</li>
+<li><b>429</b> rate-limited; <b>5xx</b> server-side — only these (plus timeouts) should be blindly retried.</li>
+</ul>
+<p>The 4xx-vs-5xx split matters operationally: 4xx means "don't retry, fix the request", 5xx means "our fault, retry with backoff".</p>
+<pre>// Wallet collection — GET returns 200; POST returns 201 + Location
+@RestController
+@RequestMapping("/v1/wallets")
+public class WalletResourceController {
+
+    private final WalletService walletService;
+
+    public WalletResourceController(WalletService walletService) {
+        this.walletService = walletService;
+    }
+
+    @GetMapping("/{walletId}")
+    public WalletResponse getWallet(@PathVariable String walletId) {
+        return walletService.findById(walletId)
+            .orElseThrow(() -&gt; new WalletNotFoundException(walletId));
+    }
+
+    @PostMapping
+    public ResponseEntity&lt;WalletResponse&gt; createWallet(@RequestBody CreateWalletRequest req) {
+        WalletResponse created = walletService.create(req);
+        URI location = URI.create("/v1/wallets/" + created.id());
+        return ResponseEntity.created(location).body(created);
+    }
+
+    // GET /v1/wallets/{walletId}/ledger-entries — nested sub-resource
+    @GetMapping("/{walletId}/ledger-entries")
+    public List&lt;LedgerEntryResponse&gt; listLedgerEntries(
+            @PathVariable String walletId,
+            @RequestParam(defaultValue = "20") int limit) {
+        return walletService.listLedgerEntries(walletId, limit);
+    }
+}</pre>` },
+    { title: `Applying it to a payment API`, body: `<p>A clean model, step by step, following the request flow: <code>POST /orders</code> creates an order (201 + Location); <code>POST /orders/{id}/payments</code> with an <code>Idempotency-Key</code> initiates a charge (201 or 202 if the Gateway is async); <code>GET /payments/{id}</code> reads status (cacheable); a refund is its own sub-resource <code>POST /payments/{id}/refunds</code> rather than a <code>PUT ?action=refund</code>.</p>
+<p>Keep representations consistent (same field names, same money format), version the media type or path, and don't leak database internals into resource shapes. The payoff is an API whose behavior — caching, retry-safety, error handling — is predictable from HTTP semantics alone.</p>
+<pre>// Refund as its own sub-resource — not PUT /payments/{id}?action=refund
+@RestController
+@RequestMapping("/v1/payments")
+public class RefundResourceController {
+
+    private final RefundService refundService;
+
+    public RefundResourceController(RefundService refundService) {
+        this.refundService = refundService;
+    }
+
+    @PostMapping("/{paymentId}/refunds")
+    public ResponseEntity&lt;RefundResponse&gt; createRefund(
+            @PathVariable String paymentId,
+            @RequestBody RefundRequest body,
+            @RequestHeader("Idempotency-Key") String idempotencyKey) {
+        RefundResponse refund = refundService.refund(paymentId, body, idempotencyKey);
+        URI location = URI.create("/v1/refunds/" + refund.id());
+        return ResponseEntity.created(location).body(refund);
+    }
+
+    // Async capture: 202 Accepted when Gateway processes out-of-band
+    @PostMapping("/{paymentId}/capture")
+    public ResponseEntity&lt;PaymentResponse&gt; capturePayment(@PathVariable String paymentId) {
+        CaptureResult result = refundService.capture(paymentId);
+        if (result.isAsync()) {
+            return ResponseEntity.accepted().body(result.payment());
+        }
+        return ResponseEntity.ok(result.payment());
+    }
+}</pre>` },
   ],
-  figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="REST Resource Modeling structure">
-<defs><marker id="fig-rest-resource-modeling-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">REST Resource M…</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-rest-resource-modeling-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-rest-resource-modeling-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-rest-resource-modeling-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">REST Resource Modeling — class and integration boundaries</text>
-</svg>`, caption: `Structure of the REST Resource Modeling pattern — components and data flow in Order Service.` }
-  ],
-  related: [],
-  
-  
-  template: "dataModel",
-  sim: () => ({
-    note: `Explore REST Resource Modeling in the payment platform. — schema view`,
-    toggles: [{ key: "fix", label: "Normalized design", kind: "ok", value: false }],
-    tables: (ctx) => ctx.toggles.fix ? [
-      { name: "payments", cols: [{ name: "id", pk: true }, { name: "wallet_id", fk: true }, { name: "amount" }] },
-      { name: "wallets", cols: [{ name: "id", pk: true }, { name: "balance" }] },
-      { name: "outbox", cols: [{ name: "id", pk: true }, { name: "event", fk: true }] },
-    ] : [
-      { name: "everything", cols: [{ name: "blob", pk: true }, { name: "misc" }] },
-    ],
-    relations: [{ from: "payments", to: "wallets" }],
-    status: (ctx) => ({ text: ctx.toggles.fix ? "schema supports REST Resource Modeling" : "schema fights the pattern", cls: ctx.toggles.fix ? "ok" : "warn" }),
-  }),
+  related: ["api-versioning-strategies", "error-contract-design", "api-idempotency", "pagination-offset-cursor", "hateoas"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

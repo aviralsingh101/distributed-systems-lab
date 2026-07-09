@@ -1,7 +1,7 @@
 // @article-v2
+// @sim-lab
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { flowTemplate } from "../../../sim/templates/index.js";
+import { createTopicSim } from "../../../sim/lab/registry.js";
 
 const topic = makeTopic({
   id: "backpressure-pattern",
@@ -10,85 +10,58 @@ const topic = makeTopic({
   track: "lld",
   tier: "essential",
   archetype: "pattern",
-  oneliner: `Slow producer when consumer lags.`,
+  oneliner: `When a consumer cannot keep up, signal the producer to slow down instead of letting unbounded buffers grow until the system runs out of memory.`,
   sections: [
-    { title: `Motivation`, body: `<p>Slow producer when consumer lags.</p>
-<p>Without <b>Backpressure Pattern</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Backpressure Pattern</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Backpressure Pattern</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Backpressure Pattern</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Backpressure Pattern</b> changes to production:</p>
+    { title: `The problem backpressure addresses`, body: `<p>In any producer→consumer pipeline where the producer is faster than the consumer, the difference has to go <em>somewhere</em>. Without a feedback mechanism it accumulates in a buffer — an in-memory queue, a socket buffer, a broker topic — that grows without bound until the process OOMs, latency explodes, or the broker rejects writes. <b>Backpressure</b> is the flow-control signal that pushes the "slow down" information back upstream so the fast producer matches the slow consumer's rate.</p>
+<p>It is the difference between a system that degrades gracefully under overload and one that collapses.</p>` },
+    { title: `Structure: how the signal propagates`, body: `<p>Backpressure works by making the producer's send <em>depend</em> on the consumer's readiness. Common mechanisms, from tightest to loosest coupling:</p>
 <ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Backpressure Pattern</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<li><b>Blocking / bounded buffers</b> — a fixed-size queue; when full, <code>put()</code> blocks the producer thread. TCP flow control does this at the socket level via the receive window.</li>
+<li><b>Demand-based (reactive) streams</b> — the consumer explicitly requests N items (<code>request(n)</code>); the producer may only emit up to the outstanding demand. This is the model in Reactive Streams / Project Reactor.</li>
+<li><b>Pull-based consumption</b> — the consumer fetches when ready (Kafka poll, work-queue workers), so it inherently cannot be overrun; lag shows up as backlog rather than crash.</li>
+<li><b>Credit / token schemes</b> — the consumer grants the producer a budget of in-flight messages and replenishes it as it drains.</li>
+</ul>` },
+    { title: `Load shedding vs slowing down`, body: `<p>When you truly cannot slow the source (an external client, a market data feed), backpressure has to become <b>load shedding</b>: bound the buffer and, on overflow, apply a policy — drop oldest, drop newest, sample, or reject with <code>429 Too Many Requests</code> / <code>503</code> so the caller backs off. This is a deliberate, bounded loss instead of an uncontrolled crash.</p>
+<p>Rate limiting and circuit breakers are the request-path cousins of backpressure: they protect a slow downstream by refusing or delaying inbound work rather than queueing it indefinitely.</p>` },
+    { title: `Implementing and tuning it`, body: `<p>Practical rules: make every buffer <b>bounded</b> (an unbounded queue is a latent outage); decide overflow policy explicitly; and propagate the signal end-to-end — backpressure that stops at the first hop just relocates the unbounded buffer. In a chain, the slowest stage should throttle everything upstream of it.</p>
+<p>Watch the trade-off: too little buffering wastes throughput and can't absorb bursts; too much hides the problem and inflates tail latency. Monitor queue depth, in-flight count, and the rate of shed/rejected work. Use backpressure whenever producers and consumers run at independent, variable speeds — which is nearly every async pipeline.</p>
+<pre>// --- Bounded buffer: block producer when full (Reactor) ---
+@Service
+public class PaymentIngestService {
+    private final Sinks.Many&lt;PaymentEvent&gt; sink = Sinks.many()
+        .multicast()
+        .onBackpressureBuffer(1000, BufferOverflowStrategy.ERROR);
+
+    public Mono&lt;Void&gt; ingest(PaymentEvent event) {
+        return Mono.fromRunnable(() -&gt; sink.tryEmitNext(event).orThrow());
+    }
+
+    @PostConstruct
+    void subscribe() {
+        sink.asFlux()
+            .flatMap(this::process, 10) // max 10 concurrent
+            .onErrorContinue((e, ev) -&gt; log.warn("dropped {}", ev, e))
+            .subscribe();
+    }
+}</pre>
+<pre>// --- Pull-based backpressure: consumer controls fetch rate ---
+@KafkaListener(topics = "payment.events", groupId = "analytics")
+public void consume(
+        List&lt;ConsumerRecord&lt;String, String&gt;&gt; batch,
+        Acknowledgment ack) {
+    if (downstreamDb.isOverloaded()) {
+        return; // do not ack — broker redelivers when ready
+    }
+    batch.forEach(this::project);
+    ack.acknowledge();
+}</pre>` },
   ],
-  figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Backpressure Pattern structure">
-<defs><marker id="fig-backpressure-pattern-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Backpressure Pa…</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-backpressure-pattern-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-backpressure-pattern-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-backpressure-pattern-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Backpressure Pattern — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Backpressure Pattern pattern — components and data flow in Order Service.` }
-  ],
-  related: ["backpressure"],
-  
-  
-  template: "flow",
-  sim: () => ({
-    note: `Explore Backpressure Pattern in the payment platform.`,
-    toggles: [{ key: "fix", label: "Apply Backpressure Pattern", kind: "ok", value: false }],
-    scenario(ctx) {
-      const fix = ctx.toggles.fix;
-      const actors = [
-        { id: "client", label: "Client", color: C.client },
-        { id: "order", label: "Order Service", color: C.service },
-        { id: "ledger", label: "Ledger", color: C.ledger, kind: "db", value: "balance" },
-        { id: "queue", label: "Event Queue", color: C.queue },
-      ];
-      const steps = fix ? [
-        { from: "client", to: "order", label: "pay", good: true },
-        { from: "order", to: "ledger", label: "Backpressure Pattern ✓", good: true, set: { ledger: "committed" } },
-        { from: "ledger", to: "queue", label: "event", good: true },
-      ] : [
-        { from: "client", to: "order", label: "pay" },
-        { from: "order", to: "ledger", label: "naive write", bad: true, set: { ledger: "risk" } },
-        { from: "order", to: "queue", label: "dual write?", dashed: true, bad: true },
-      ];
-      return {
-        actors, steps, stepDur: 1.2,
-        status: (r) => !r.done ? { text: "processing…", cls: "" }
-          : fix ? { text: "Backpressure Pattern applied", cls: "ok" } : { text: "pattern missing", cls: "err" },
-      };
-    },
-  }),
+  related: ["backpressure", "work-queue", "delayed-scheduled-messages", "point-to-point", "fire-and-forget"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
+
 export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
+  return createTopicSim("backpressure-pattern", stage, panel, stageEl);
 }

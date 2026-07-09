@@ -1,6 +1,7 @@
 // @article-v2
-import { mountSimulation } from "../../../sim/controls.js";
+// @sim-lab
 import { C, phaseOf, clamp } from "../../../sim/primitives.js";
+import { createTopicSim } from "../../../sim/lab/registry.js";
 
 export const meta = { id: "deadlock", title: "Deadlock", category: "locking" };
 
@@ -35,83 +36,11 @@ export const content = {
 <p>Interview tip: whiteboard the charge flow, mark where <b>Deadlock</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
   ],
   figures: [
-    { id: "dist-lock", svg: `<svg viewBox="0 0 400 110" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Distributed lock">
-<rect x="40" y="38" width="70" height="36" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
-<text x="75" y="60" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Pod A</text>
-<rect x="40" y="78" width="70" height="28" rx="6" fill="#1a2236" stroke="#ff5c6c" stroke-width="1.5"/>
-<text x="75" y="86" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Pod B</text><text x="75" y="106" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">stale</text>
-<rect x="160" y="48" width="90" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="205" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Redis Lock</text><text x="205" y="82" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">token=42</text>
-<rect x="290" y="38" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="335" y="60" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger</text>
-<text x="200" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Only token holder may write</text>
-</svg>`, caption: `Distributed lock: SET key NX PX with unique token; stale holder rejected via fencing token.` },
-    { id: "request-path", svg: `<svg viewBox="0 0 640 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Deadlock in request path">
-<defs><marker id="fig-deadlock-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="10" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="46" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Client</text>
-<rect x="100" y="40" width="88" height="36" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="144" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Deadlock</text><text x="144" y="72" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">this topic</text>
-<rect x="206" y="40" width="80" height="36" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
-<text x="246" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Order</text>
-<rect x="304" y="40" width="84" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="346" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Gateway</text>
-<rect x="406" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="442" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger</text>
-<rect x="496" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="532" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Queue</text>
-<line x1="82" y1="58" x2="98" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-deadlock-arr)"/>
-<line x1="188" y1="58" x2="204" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-deadlock-arr)"/>
-<line x1="286" y1="58" x2="302" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-deadlock-arr)"/>
-<line x1="388" y1="58" x2="404" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-deadlock-arr)"/>
-<line x1="478" y1="58" x2="494" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-deadlock-arr)"/>
-<text x="320" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">HTTPS request flow — Deadlock</text>
-</svg>`, caption: `Deadlock on the payment request path — from client charge to Ledger commit.` }
+    { id: "lock-timeline", svg: `<svg viewBox="0 0 560 180" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Deadlock lock timeline"> <defs><marker id="fig-deadlock-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs> <text x="280" y="18" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Lock lease timeline</text> <rect x="30" y="50" width="80" height="36" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/> <text x="70" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Worker A</text><text x="70" y="78" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">holds lock</text> <rect x="30" y="110" width="80" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/> <text x="70" y="122" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Worker B</text><text x="70" y="138" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">waits</text> <rect x="140" y="80" width="100" height="40" rx="6" fill="#1a2236" stroke="#ffd166" stroke-width="1.5"/> <text x="190" y="94" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Redis lock</text><text x="190" y="110" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">SET NX PX</text> <rect x="270" y="50" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/> <text x="315" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">lease OK</text><text x="315" y="78" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">f=1</text> <rect x="270" y="110" width="90" height="36" rx="6" fill="#1a2236" stroke="#93a1bd" stroke-width="1.5"/> <text x="315" y="132" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">blocked</text> <rect x="390" y="50" width="90" height="36" rx="6" fill="#1a2236" stroke="#ff5c6c" stroke-width="1.5"/> <text x="435" y="72" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">lease expired</text> <rect x="390" y="110" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/> <text x="435" y="122" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">acquires</text><text x="435" y="138" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">f=2</text> <rect x="500" y="80" width="50" height="40" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/> <text x="525" y="104" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">safe</text> <line x1="110" y1="68" x2="138" y2="88" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-deadlock-arr)"/> <line x1="110" y1="128" x2="138" y2="100" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-deadlock-arr)"/> <line x1="240" y1="68" x2="268" y2="68" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-deadlock-arr)"/> <line x1="240" y1="128" x2="268" y2="128" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-deadlock-arr)"/> <line x1="360" y1="68" x2="388" y2="68" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-deadlock-arr)"/> <line x1="360" y1="128" x2="388" y2="128" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-deadlock-arr)"/> <line x1="480" y1="128" x2="498" y2="100" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-deadlock-arr)"/> <text x="330" y="38" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">TTL expires</text> </svg>`, caption: `Deadlock: lease-based lock with fencing token — stale holder must not write after expiry.` },
   ],
   related: [],
 };
 
 export function createSimulation(stage, panel, stageEl) {
-  const A = { x: 400, y: 150 }, B = { x: 600, y: 150 }, T1 = { x: 250, y: 400 }, T2 = { x: 750, y: 400 };
-  return mountSimulation(stage, panel, stageEl, {
-    note: "Solid = holds lock. Dashed = waiting for lock.",
-    toggles: [{ key: "fix", label: "Global lock ordering (lock A first)", kind: "ok", value: false }],
-    frame(ctx, t) {
-      const d = ctx.d;
-      const drawNode = (n, label, color, state) => d.node(n.x - 62, n.y - 32, 124, 64, { title: label, color, state, active: state === "ok" || state === "err" });
-      const link = (p, q, o) => d.arrow(p.x, p.y, q.x, q.y, o);
-
-      if (!ctx.toggles.fix) {
-        const ph = phaseOf(t, [1, 1, 1.2, 2]);
-        const dead = ph.i >= 3;
-        // holds
-        if (ph.i >= 0) link(T1, A, { color: C.service, width: 2.4, label: "holds", progress: ph.i === 0 ? ph.p : 1 });
-        if (ph.i >= 1) link(T2, B, { color: C.gateway, width: 2.4, label: "holds", progress: ph.i === 1 ? ph.p : 1 });
-        // waits
-        if (ph.i >= 2) link(T1, B, { color: dead ? C.err : C.warn, dashed: true, label: "wants", progress: ph.i === 2 ? ph.p : 1 });
-        if (ph.i >= 2) link(T2, A, { color: dead ? C.err : C.warn, dashed: true, label: "wants", progress: ph.i === 2 ? ph.p : 1 });
-        drawNode(A, "Wallet A", C.wallet, dead ? "err" : "");
-        drawNode(B, "Wallet B", C.wallet, dead ? "err" : "");
-        drawNode(T1, "T1: A→B", C.service, dead ? "err" : "ok");
-        drawNode(T2, "T2: B→A", C.gateway, dead ? "err" : "ok");
-        if (dead) d.badge(500, 500, "DEADLOCK — wait-for cycle", { color: C.err, align: "center" });
-        ctx.setStatus(dead ? "deadlock (both blocked)" : "acquiring locks…", dead ? "err" : "");
-      } else {
-        const ph = phaseOf(t, [1, 1, 1, 1, 1.4]);
-        // Ordered: everyone locks A first, then B
-        const t1HasA = ph.i >= 0, t1HasB = ph.i >= 1, t1Done = ph.i >= 2;
-        const t2Turn = ph.i >= 3;
-        if (t1HasA && !t1Done) link(T1, A, { color: C.service, width: 2.4, label: "holds", progress: ph.i === 0 ? ph.p : 1 });
-        if (t1HasB && !t1Done) link(T1, B, { color: C.service, width: 2.4, label: "holds", progress: ph.i === 1 ? ph.p : 1 });
-        if (!t2Turn) link(T2, A, { color: C.warn, dashed: true, label: "waits for A", progress: 1 });
-        if (t2Turn) { link(T2, A, { color: C.gateway, width: 2.4, label: "holds", progress: ph.i === 3 ? ph.p : 1 }); link(T2, B, { color: C.gateway, width: 2.4, label: "holds", progress: ph.i === 4 ? ph.p : 1 }); }
-        drawNode(A, "Wallet A", C.wallet, "");
-        drawNode(B, "Wallet B", C.wallet, "");
-        drawNode(T1, "T1: A→B", C.service, t1Done ? "" : "ok");
-        drawNode(T2, "T2: B→A", C.gateway, t2Turn ? "ok" : "warn");
-        d.badge(500, 500, "ordered locks — no cycle", { color: C.ok, align: "center" });
-        ctx.setStatus(t2Turn ? "both complete in order" : "T1 first, T2 waits", "ok");
-      }
-    },
-  });
+  return createTopicSim("deadlock", stage, panel, stageEl);
 }

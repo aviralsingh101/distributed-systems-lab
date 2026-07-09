@@ -1,7 +1,5 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { flowTemplate } from "../../../sim/templates/index.js";
 
 const topic = makeTopic({
   id: "property-based-testing",
@@ -10,85 +8,83 @@ const topic = makeTopic({
   track: "lld",
   tier: "hidden-gem",
   archetype: "pattern",
-  oneliner: `Generate inputs; assert invariants.`,
+  oneliner: `Instead of hand-picking examples, state an invariant that must hold for all inputs and let a generator hunt for a counterexample.`,
   sections: [
-    { title: `Motivation`, body: `<p>Generate inputs; assert invariants.</p>
-<p>Without <b>Property-Based Testing</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Property-Based Testing</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Property-Based Testing</b>:</p>
+    { title: `From examples to properties`, body: `<p>Example-based tests assert on inputs <em>you</em> thought of: <code>split(100, 3)</code> should give <code>[34, 33, 33]</code>. Bugs hide in the cases you did not imagine — negative amounts, zero shares, huge values, rounding boundaries. <b>Property-based testing (PBT)</b> flips this: you describe a <b>property</b> (an invariant true for every valid input) and a framework — QuickCheck, fast-check, Hypothesis, <b>jqwik</b> — generates hundreds of random inputs trying to break it.</p>
+<p>For money splitting the property is not a specific output but a rule: <em>the parts always sum back to the original</em>. The framework then throws thousands of amounts and share-counts at your function looking for one where the sum is off by a cent.</p>
+<pre>// Production code — split a payment total across N recipients
+public final class PaymentSplitter {
+
+    private PaymentSplitter() {}
+
+    public static List&lt;Long&gt; splitEvenly(long totalCents, int parts) {
+        if (parts &lt;= 0) throw new IllegalArgumentException("parts must be positive");
+        if (totalCents &lt; 0) throw new IllegalArgumentException("total cannot be negative");
+        long base = totalCents / parts;
+        long remainder = totalCents % parts;
+        List&lt;Long&gt; result = new ArrayList&lt;&gt;(parts);
+        for (int i = 0; i &lt; parts; i++) {
+            result.add(base + (i &lt; remainder ? 1 : 0));
+        }
+        return result;
+    }
+}</pre>` },
+    { title: `The three moving parts`, body: `<p>A property-based test is built from three pieces that work together:</p>
 <ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
+<li><b>Generators</b> — describe the space of valid inputs (e.g. integers 0–10⁹, share counts 1–100). The framework samples from these, biasing toward edge values like 0, 1, and max.</li>
+<li><b>The property (invariant)</b> — a boolean assertion that must hold for every generated input. Common shapes: <em>round-trip</em> (<code>decode(encode(x)) == x</code>), <em>conservation</em> (splits sum to the total), <em>idempotence</em> (applying twice equals once), and comparison against a simple <em>oracle</em>.</li>
+<li><b>Shrinking</b> — when a counterexample is found, the framework automatically <em>reduces</em> it to the smallest failing case, so instead of "fails at 987654321 split 47 ways" you get "fails at 10 split 3 ways" — a minimal, debuggable example.</li>
 </ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Property-Based Testing</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Property-Based Testing</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Property-Based Testing</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<pre>import net.jqwik.api.*;
+import static org.junit.jupiter.api.Assertions.*;
+
+class PaymentSplitterPropertyTest {
+
+    @Property
+    void partsAlwaysSumToTotal(
+            @ForAll @LongRange(min = 0, max = 1_000_000_000) long totalCents,
+            @ForAll @IntRange(min = 1, max = 100) int parts) {
+
+        List&lt;Long&gt; shares = PaymentSplitter.splitEvenly(totalCents, parts);
+        long sum = shares.stream().mapToLong(Long::longValue).sum();
+
+        assertEquals(totalCents, sum);
+        assertEquals(parts, shares.size());
+        assertTrue(shares.stream().allMatch(s -&gt; s &gt;= 0));
+    }
+
+    @Property
+    void noShareDiffersByMoreThanOneCent(
+            @ForAll @LongRange(min = 0, max = 1_000_000) long totalCents,
+            @ForAll @IntRange(min = 1, max = 50) int parts) {
+
+        List&lt;Long&gt; shares = PaymentSplitter.splitEvenly(totalCents, parts);
+        long min = shares.stream().mapToLong(Long::longValue).min().orElse(0);
+        long max = shares.stream().mapToLong(Long::longValue).max().orElse(0);
+        assertTrue(max - min &lt;= 1, "shares must differ by at most 1 cent");
+    }
+}</pre>` },
+    { title: `Structure of a test and where it shines`, body: `<p>Shrinking is what makes this practical: a raw random failure is noise, but the minimized counterexample usually points straight at the bug. Suppose a buggy implementation used floating-point division — jqwik would shrink to something like <code>totalCents=10, parts=3</code> where the sum is 9 instead of 10.</p>
+<pre>    @Property
+    void roundTrip_encodeDecodePaymentId(@ForAll("paymentIds") String paymentId) {
+        String encoded = PaymentIdCodec.encode(paymentId);
+        assertEquals(paymentId, PaymentIdCodec.decode(encoded));
+    }
+
+    @Provide
+    Arbitrary&lt;String&gt; paymentIds() {
+        return Arbitraries.strings()
+            .withCharRange('a', 'z')
+            .ofMinLength(8).ofMaxLength(32)
+            .map(s -&gt; "pay_" + s);
+    }</pre>
+<p>PBT excels on code with clear algebraic invariants — serializers, parsers, money and rounding, sorting, state machines, and data structures. It complements example tests rather than replacing them; keep a few named examples as living documentation and let properties cover the vast input space you would never enumerate by hand. Seed the RNG in CI so a failing case is reproducible:</p>
+<pre>// junit-platform.properties
+jqwik.tries.default = 500
+jqwik.report.onlyfailures = true</pre>` },
   ],
-  figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Property-Based Testing structure">
-<defs><marker id="fig-property-based-testing-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Property-Based …</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-property-based-testing-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-property-based-testing-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-property-based-testing-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Property-Based Testing — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Property-Based Testing pattern — components and data flow in Order Service.` }
-  ],
-  related: [],
-  
-  
-  template: "flow",
-  sim: () => ({
-    note: `Explore Property-Based Testing in the payment platform.`,
-    toggles: [{ key: "fix", label: "Apply Property-Based Testing", kind: "ok", value: false }],
-    scenario(ctx) {
-      const fix = ctx.toggles.fix;
-      const actors = [
-        { id: "client", label: "Client", color: C.client },
-        { id: "order", label: "Order Service", color: C.service },
-        { id: "ledger", label: "Ledger", color: C.ledger, kind: "db", value: "balance" },
-        { id: "queue", label: "Event Queue", color: C.queue },
-      ];
-      const steps = fix ? [
-        { from: "client", to: "order", label: "pay", good: true },
-        { from: "order", to: "ledger", label: "Property-Based Testing ✓", good: true, set: { ledger: "committed" } },
-        { from: "ledger", to: "queue", label: "event", good: true },
-      ] : [
-        { from: "client", to: "order", label: "pay" },
-        { from: "order", to: "ledger", label: "naive write", bad: true, set: { ledger: "risk" } },
-        { from: "order", to: "queue", label: "dual write?", dashed: true, bad: true },
-      ];
-      return {
-        actors, steps, stepDur: 1.2,
-        status: (r) => !r.done ? { text: "processing…", cls: "" }
-          : fix ? { text: "Property-Based Testing applied", cls: "ok" } : { text: "pattern missing", cls: "err" },
-      };
-    },
-  }),
+  related: ["unit-integration-contract", "tdd-for-lld", "mutation-testing"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

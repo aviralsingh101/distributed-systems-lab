@@ -1,7 +1,26 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { topologyTemplate } from "../../../sim/templates/index.js";
+
+const POOL_SVG = `<svg viewBox="0 0 520 190" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Object pool acquire and release">
+  <defs><marker id="fig-object-pool-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
+  <rect x="20" y="70" width="120" height="50" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
+  <text x="80" y="98" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Client</text>
+  <rect x="200" y="30" width="180" height="130" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
+  <text x="290" y="50" text-anchor="middle" fill="#cdd6e8" font-size="11" font-weight="600" font-family="system-ui">ConnectionPool</text>
+  <rect x="220" y="66" width="60" height="26" rx="4" fill="#1a2236" stroke="#3ddc97" stroke-width="1.2"/>
+  <text x="250" y="83" text-anchor="middle" fill="#3ddc97" font-size="9" font-family="system-ui">idle</text>
+  <rect x="300" y="66" width="60" height="26" rx="4" fill="#1a2236" stroke="#3ddc97" stroke-width="1.2"/>
+  <text x="330" y="83" text-anchor="middle" fill="#3ddc97" font-size="9" font-family="system-ui">idle</text>
+  <rect x="220" y="102" width="60" height="26" rx="4" fill="#1a2236" stroke="#ff6b6b" stroke-width="1.2"/>
+  <text x="250" y="119" text-anchor="middle" fill="#ff6b6b" font-size="9" font-family="system-ui">in use</text>
+  <rect x="300" y="102" width="60" height="26" rx="4" fill="#1a2236" stroke="#ff6b6b" stroke-width="1.2"/>
+  <text x="330" y="119" text-anchor="middle" fill="#ff6b6b" font-size="9" font-family="system-ui">in use</text>
+  <text x="290" y="150" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">fixed capacity; blocks when empty</text>
+  <line x1="140" y1="86" x2="198" y2="80" stroke="#3ddc97" stroke-width="1.4" marker-end="url(#fig-object-pool-arr)"/>
+  <text x="170" y="72" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">acquire</text>
+  <line x1="198" y1="112" x2="140" y2="106" stroke="#5b9dff" stroke-width="1.4" marker-end="url(#fig-object-pool-arr)"/>
+  <text x="170" y="128" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">release</text>
+</svg>`;
 
 const topic = makeTopic({
   id: "object-pool",
@@ -10,77 +29,87 @@ const topic = makeTopic({
   track: "lld",
   tier: "essential",
   archetype: "pattern",
-  oneliner: `Reuse expensive objects.`,
+  oneliner: `Keep a set of expensive-to-create objects ready for reuse, lending them to clients and reclaiming them instead of constructing and destroying on every use.`,
   sections: [
-    { title: `Motivation`, body: `<p>Reuse expensive objects.</p>
-<p>Without <b>Object Pool</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Object Pool</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Object Pool</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Object Pool</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Object Pool</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Object Pool</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+    { title: `The problem it solves`, body: `<p><b>Object Pool</b> is a creational pattern for objects whose creation or destruction is costly and whose number in use at once is bounded — the canonical case is database connections, but it also covers thread pools, large buffers, and expensive client handles to a payment gateway.</p>
+<p>Creating a fresh connection per charge request means a TCP handshake, TLS negotiation, and authentication every time, adding latency and load. A pool amortizes that: connections are opened once, reused across many requests, and returned to the pool rather than closed.</p>` },
+    { title: `Structure`, figureAfter: "pool-uml", body: `<p>The roles: a <b>Pool</b> manages a collection of reusable objects and tracks which are idle versus in use. It exposes <code>acquire()</code> and <code>release(obj)</code>. A <b>factory</b> hook tells the pool how to create and validate members.</p>
+<pre>public interface PooledConnection extends AutoCloseable {
+    void executeQuery(String sql);
+    void reset();  // clear session state before return to pool
+}
+
+public final class GatewayConnectionPool {
+    private final BlockingQueue&lt;PooledConnection&gt; idle;
+    private final AtomicInteger inUse = new AtomicInteger(0);
+    private final int maxSize;
+    private final Supplier&lt;PooledConnection&gt; factory;
+
+    public GatewayConnectionPool(int maxSize, Supplier&lt;PooledConnection&gt; factory) {
+        this.maxSize = maxSize;
+        this.factory = factory;
+        this.idle = new ArrayBlockingQueue&lt;&gt;(maxSize);
+        // Pre-warm minimum connections
+        for (int i = 0; i &lt; maxSize / 2; i++) {
+            idle.offer(factory.get());
+        }
+    }
+
+    public PooledConnection acquire() throws InterruptedException {
+        PooledConnection conn = idle.poll(5, TimeUnit.SECONDS);
+        if (conn == null &amp;&amp; inUse.get() &lt; maxSize) {
+            conn = factory.get();
+        }
+        if (conn == null) throw new PoolExhaustedException("no connections available");
+        inUse.incrementAndGet();
+        return conn;
+    }
+
+    public void release(PooledConnection conn) {
+        conn.reset();
+        idle.offer(conn);
+        inUse.decrementAndGet();
+    }
+}</pre>` },
+    { title: `Flow and lifecycle`, body: `<p>Step by step: (1) the pool pre-warms a minimum number of objects. (2) a client calls <code>acquire()</code> and receives an idle object, marked in use. (3) it does its work. (4) it calls <code>release()</code> in a <code>finally</code> block so the object returns even on error.</p>
+<pre>public class LedgerRepository {
+    private final GatewayConnectionPool pool;
+
+    public LedgerRepository(GatewayConnectionPool pool) {
+        this.pool = pool;
+    }
+
+    public void recordEntry(LedgerEntry entry) throws InterruptedException {
+        PooledConnection conn = pool.acquire();
+        try {
+            conn.executeQuery(
+                "INSERT INTO ledger (id, amount) VALUES ('"
+                + entry.id() + "', " + entry.amountCents() + ")"
+            );
+        } finally {
+            pool.release(conn);  // ALWAYS release — leaked conn starves the pool
+        }
+    }
+}
+
+// Even cleaner with try-with-resources wrapper
+public PooledConnection acquireAutoCloseable() throws InterruptedException {
+    PooledConnection conn = acquire();
+    return new PooledConnection() {
+        @Override public void executeQuery(String sql) { conn.executeQuery(sql); }
+        @Override public void reset() { conn.reset(); }
+        @Override public void close() { release(conn); }  // AutoCloseable → release
+    };
+}</pre>
+<p>On release the pool resets the object's state (roll back open transactions, clear session variables) so the next borrower gets a clean instance. Idle objects are periodically health-checked and evicted if stale.</p>` },
+    { title: `Trade-offs and pitfalls`, body: `<p><b>Benefits:</b> avoids repeated expensive construction, bounds resource usage, and smooths latency. <b>Costs and pitfalls:</b> a <b>leaked</b> object never returned starves the pool and eventually deadlocks callers; <b>stale state</b> not reset between uses causes cross-request bugs and data leaks; sizing is subtle — too small throttles throughput, too large overwhelms the backend.</p>
+<p>Pooling only pays off when construction is genuinely expensive; for cheap objects it adds complexity and contention for no gain (KISS). Most teams use a proven library (HikariCP for JDBC) rather than hand-rolling one — but understanding the pattern explains what HikariCP is doing under the hood.</p>` },
   ],
   figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Object Pool structure">
-<defs><marker id="fig-object-pool-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Object Pool</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-object-pool-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-object-pool-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-object-pool-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Object Pool — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Object Pool pattern — components and data flow in Order Service.` }
+    { id: "pool-uml", svg: POOL_SVG, caption: `Clients acquire idle objects from a fixed-capacity pool and release them back; the pool tracks in-use versus idle and resets state on return.` },
   ],
-  related: [],
-  
-  
-  template: "topology",
-  sim: () => ({
-    note: `Explore Object Pool in the payment platform.`,
-    toggles: [{ key: "fix", label: "Apply Object Pool", kind: "ok", value: false }],
-    nodes: (ctx) => [
-      { id: "c", x: 160, y: 280, title: "Client", color: C.client },
-      { id: "o", x: 400, y: 200, title: "Order", color: C.service, active: true },
-      { id: "g", x: 640, y: 280, title: "Gateway", color: C.gateway },
-      { id: "l", x: 500, y: 400, title: "Ledger", color: C.ledger, value: ctx.toggles.fix ? "ok" : "?" },
-      { id: "q", x: 840, y: 200, title: "Queue", color: C.queue },
-    ],
-    edges: (ctx) => [
-      { from: "c", to: "o", active: true },
-      { from: "o", to: "g", active: ctx.toggles.fix },
-      { from: "g", to: "l", active: ctx.toggles.fix },
-      { from: "l", to: "q", active: ctx.toggles.fix, label: "Object Pool" },
-    ],
-    activeEdge: (ctx, t) => ctx.toggles.fix ? { from: "l", to: "q" } : { from: "c", to: "o" },
-    status: (ctx) => ({ text: ctx.toggles.fix ? "Object Pool in path" : "pattern absent", cls: ctx.toggles.fix ? "ok" : "warn" }),
-  }),
+  related: ["singleton", "prototype", "factory-method", "dependency-injection"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}

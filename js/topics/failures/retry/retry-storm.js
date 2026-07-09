@@ -1,6 +1,7 @@
 // @article-v2
-import { mountSimulation } from "../../../sim/controls.js";
+// @sim-lab
 import { C, clamp, cycle } from "../../../sim/primitives.js";
+import { createTopicSim } from "../../../sim/lab/registry.js";
 
 export const meta = { id: "retry-storm", title: "Retry Storm", category: "retry" };
 
@@ -35,79 +36,11 @@ export const content = {
 <p>Interview tip: whiteboard the charge flow, mark where <b>Retry Storm</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
   ],
   figures: [
-    { id: "retry-amplify", svg: `<svg viewBox="0 0 420 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Retry storm">
-<rect x="30" y="20" width="50" height="24" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="55" y="36" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">C1</text><rect x="30" y="50" width="50" height="24" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="55" y="66" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">C2</text><rect x="30" y="80" width="50" height="24" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="55" y="96" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">C3</text>
-<rect x="150" y="45" width="80" height="40" rx="6" fill="#1a2236" stroke="#ff5c6c" stroke-width="1.5"/>
-<text x="190" y="59" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">API</text><text x="190" y="79" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">slow</text>
-<rect x="280" y="20" width="50" height="24" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="305" y="36" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">retry</text><rect x="280" y="50" width="50" height="24" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="305" y="66" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">retry</text><rect x="280" y="80" width="50" height="24" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="305" y="96" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">retry</text>
-<rect x="360" y="45" width="50" height="40" rx="6" fill="#1a2236" stroke="#ff5c6c" stroke-width="1.5"/>
-<text x="385" y="59" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">DB</text><text x="385" y="79" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">overload</text>
-<text x="210" y="18" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">retries amplify load × N clients</text>
-</svg>`, caption: `Retry storm: each client retries a slow service, multiplying load on an already degraded backend.` },
-    { id: "request-path", svg: `<svg viewBox="0 0 640 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Retry Storm in request path">
-<defs><marker id="fig-retry-storm-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="10" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="46" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Client</text>
-<rect x="100" y="40" width="88" height="36" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="144" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Retry Storm</text><text x="144" y="72" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">this topic</text>
-<rect x="206" y="40" width="80" height="36" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
-<text x="246" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Order</text>
-<rect x="304" y="40" width="84" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="346" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Gateway</text>
-<rect x="406" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="442" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger</text>
-<rect x="496" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="532" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Queue</text>
-<line x1="82" y1="58" x2="98" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-retry-storm-arr)"/>
-<line x1="188" y1="58" x2="204" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-retry-storm-arr)"/>
-<line x1="286" y1="58" x2="302" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-retry-storm-arr)"/>
-<line x1="388" y1="58" x2="404" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-retry-storm-arr)"/>
-<line x1="478" y1="58" x2="494" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-retry-storm-arr)"/>
-<text x="320" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">HTTPS request flow — Retry Storm</text>
-</svg>`, caption: `Retry Storm on the payment request path — from client charge to Ledger commit.` }
+    { id: "retry-amp", svg: `<svg viewBox="0 0 420 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Retry Storm retries"> <defs><marker id="fig-retry-storm-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs> <rect x="30" y="40" width="70" height="36" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/> <text x="65" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Client</text><text x="65" y="68" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">×3 retry</text> <rect x="130" y="40" width="90" height="36" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/> <text x="175" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Client</text><text x="175" y="68" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">×3 retry</text> <rect x="250" y="40" width="90" height="36" rx="6" fill="#1a2236" stroke="#ff5c6c" stroke-width="1.5"/> <text x="295" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Backend</text><text x="295" y="68" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">overloaded</text> <line x1="100" y1="58" x2="128" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-retry-storm-arr)"/> <line x1="100" y1="58" x2="128" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-retry-storm-arr)"/> <line x1="220" y1="58" x2="248" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-retry-storm-arr)"/> <text x="210" y="95" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">N clients × R retries = N×R load</text> </svg>`, caption: `Retry Storm: retries multiply load on a degraded backend — use backoff and circuit breakers.` },
   ],
   related: [],
 };
 
 export function createSimulation(stage, panel, stageEl) {
-  const CAP = 20;
-  return mountSimulation(stage, panel, stageEl, {
-    note: "Offered load vs database capacity. Retries add load.",
-    params: [{ key: "clients", label: "Client load", min: 5, max: 30, step: 1, value: 22, unit: "/s", live: true }],
-    toggles: [{ key: "fix", label: "Retry budget + circuit breaker", kind: "ok", value: false }],
-    frame(ctx, t) {
-      const d = ctx.d; const fix = ctx.toggles.fix; const clients = ctx.params.clients;
-      const base = clients;
-      const overload0 = base > CAP;
-      const retryMult = fix ? 1.1 : (overload0 ? 2.6 : 1.2);
-      const offered = base * retryMult;
-      const overloaded = offered > CAP;
-      const served = Math.min(CAP, offered);
-      const success = clamp(served / offered);
-
-      const DB = { x: 730, y: 250 };
-      d.node(DB.x - 90, DB.y - 45, 180, 90, { title: "Ledger DB", color: C.ledger, state: overloaded ? "err" : "ok", active: true, value: "cap " + CAP + "/s" });
-
-      // flowing request tokens
-      const n = Math.min(14, Math.round(offered / 2));
-      for (let i = 0; i < n; i++) {
-        const p = cycle(t * 0.6 + i / n, 1);
-        const y = 120 + (i % 7) * 45;
-        const pos = d.along(150, y, DB.x - 90, DB.y, p);
-        const fails = i / n > success;
-        d.token(pos.x, pos.y, { r: 7, color: fails ? C.err : C.service, glow: false });
-      }
-      d.node(80, 220, 120, 60, { title: "Clients", color: C.service, active: true });
-
-      d.gauge(300, 470, 360, 16, clamp(offered / (CAP * 3)), { color: overloaded ? C.err : C.ok, label: "offered load", value: offered.toFixed(0) + "/s vs cap " + CAP });
-      d.text(730, 360, "success " + Math.round(success * 100) + "%", { size: 13, align: "center", color: overloaded ? C.err : C.ok });
-      ctx.setStatus(fix ? "retry budget holds load near capacity" : (overloaded ? "retry storm — load >> capacity" : "healthy"), overloaded && !fix ? "err" : "ok");
-    },
-  });
+  return createTopicSim("retry-storm", stage, panel, stageEl);
 }

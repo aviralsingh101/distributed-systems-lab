@@ -1,5 +1,7 @@
 // @article-v2
+// @sim-lab
 import { sequenceSim } from "../../../sim/sequence.js";
+import { createTopicSim } from "../../../sim/lab/registry.js";
 import { C } from "../../../sim/primitives.js";
 
 export const meta = { id: "cache-consistency", title: "Cache Consistency", category: "cache" };
@@ -34,75 +36,9 @@ export const content = {
 </ul>
 <p>Interview tip: whiteboard the charge flow, mark where <b>Cache Consistency</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
   ],
-  figures: [
-    { id: "replica-lag", svg: `<svg viewBox="0 0 400 110" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Replication lag">
-<defs><marker id="fig-cache-consistency-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="40" y="40" width="90" height="40" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="85" y="54" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Primary</text><text x="85" y="74" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">writes</text>
-<rect x="180" y="25" width="80" height="32" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="220" y="45" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Replica 1</text>
-<rect x="180" y="70" width="80" height="32" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="220" y="90" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Replica 2</text>
-<rect x="300" y="40" width="80" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="340" y="54" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Reader</text><text x="340" y="74" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">stale?</text>
-<line x1="130" y1="55" x2="178" y2="41" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-cache-consistency-arr)"/>
-<line x1="130" y1="60" x2="178" y2="86" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-cache-consistency-arr)"/>
-<line x1="260" y1="41" x2="298" y2="52" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-cache-consistency-arr)"/>
-</svg>`, caption: `Primary accepts writes; replicas converge asynchronously — reads may be stale.` },
-    { id: "request-path", svg: `<svg viewBox="0 0 640 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Cache Consistency in request path">
-<defs><marker id="fig-cache-consistency-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="10" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="46" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Client</text>
-<rect x="100" y="40" width="88" height="36" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="144" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Cache Consist…</text><text x="144" y="72" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">this topic</text>
-<rect x="206" y="40" width="80" height="36" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
-<text x="246" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Order</text>
-<rect x="304" y="40" width="84" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="346" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Gateway</text>
-<rect x="406" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="442" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger</text>
-<rect x="496" y="40" width="72" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="532" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Queue</text>
-<line x1="82" y1="58" x2="98" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-cache-consistency-arr)"/>
-<line x1="188" y1="58" x2="204" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-cache-consistency-arr)"/>
-<line x1="286" y1="58" x2="302" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-cache-consistency-arr)"/>
-<line x1="388" y1="58" x2="404" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-cache-consistency-arr)"/>
-<line x1="478" y1="58" x2="494" y2="58" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-cache-consistency-arr)"/>
-<text x="320" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">HTTPS request flow — Cache Consistency</text>
-</svg>`, caption: `Cache Consistency on the payment request path — from client charge to Ledger commit.` }
-  ],
   related: [],
 };
 
 export function createSimulation(stage, panel, stageEl) {
-  return sequenceSim(stage, panel, stageEl, {
-    note: "DB commit succeeds; cache update may fail.",
-    toggles: [{ key: "fix", label: "Outbox + CDC (retried invalidation)", kind: "ok", value: false }],
-    scenario(ctx) {
-      const fix = ctx.toggles.fix;
-      const actors = [
-        { id: "app", label: "Writer", color: C.service },
-        { id: "db", label: "Database", color: C.ledger, kind: "db", value: "100" },
-        { id: "c", label: "Cache", color: C.queue, kind: "db", value: "100" },
-      ];
-      let steps = [
-        { from: "app", to: "db", label: "UPDATE balance=60", good: true, set: { db: fix ? "60 +outbox" : "60" } },
-      ];
-      if (!fix) {
-        steps.push(
-          { from: "app", to: "c", label: "SET balance=60 ✗", bad: true, dashed: true, set: { c: "100 (stale)" } },
-          { from: "app", to: "app", label: "give up", self: true, bad: true, set: { app: "cache stale" } },
-        );
-      } else {
-        steps.push(
-          { from: "db", to: "c", label: "CDC → invalidate", set: { c: "empty" } },
-          { from: "db", to: "c", label: "retry until ok ✓", good: true, set: { c: "reloads 60" } },
-        );
-      }
-      return {
-        actors, steps, stepDur: 1.1,
-        status: (r) => !r.done ? { text: "dual write…", cls: "" } : { text: fix ? "cache reconciled to 60 via CDC" : "cache stuck at stale 100", cls: fix ? "ok" : "err" },
-      };
-    },
-  });
+  return createTopicSim("cache-consistency", stage, panel, stageEl);
 }

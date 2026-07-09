@@ -1,7 +1,7 @@
 // @article-v2
+// @sim-lab
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { stateMachineTemplate } from "../../../sim/templates/index.js";
+import { createTopicSim } from "../../../sim/lab/registry.js";
 
 const topic = makeTopic({
   id: "state",
@@ -10,74 +10,91 @@ const topic = makeTopic({
   track: "lld",
   tier: "essential",
   archetype: "pattern",
-  oneliner: `Behavior changes with internal state.`,
+  oneliner: `Give each state of an object its own class so behaviour changes with the state — and illegal transitions become impossible by construction.`,
   sections: [
-    { title: `Motivation`, body: `<p>Behavior changes with internal state.</p>
-<p>Without <b>State</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>State</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>State</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>State</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>State</b> changes to production:</p>
+    { title: `Intent`, body: `<p><b>State</b> lets an object alter its behaviour when its internal state changes; the object appears to change its class. Instead of a status field inspected by <code>switch</code> statements scattered across every method, each state is a class that knows how to handle operations while in that state — and which state comes next.</p>
+<p>A payment is the canonical example: it moves through <em>Pending → Authorized → Captured → Refunded</em>, with a <em>Failed</em> branch. What <code>capture()</code> or <code>refund()</code> means depends entirely on where the payment currently is.</p>
+<pre>// --- State interface: operations that vary by lifecycle phase ---
+public interface PaymentState {
+    void authorize(PaymentContext payment);
+    void capture(PaymentContext payment);
+    void refund(PaymentContext payment);
+    void cancel(PaymentContext payment);
+}</pre>` },
+    { title: `Participants and structure`, body: `<p>Three roles:</p>
 <ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
+<li><b>Context</b> — the <code>Payment</code> object. It holds a reference to a current State and forwards operations to it.</li>
+<li><b>State</b> — an interface declaring the operations that vary by state: <code>authorize()</code>, <code>capture()</code>, <code>refund()</code>, <code>cancel()</code>.</li>
+<li><b>Concrete States</b> — <code>PendingState</code>, <code>AuthorizedState</code>, <code>CapturedState</code>, <code>RefundedState</code>, <code>FailedState</code>. Each implements the operations that are legal for it and rejects the rest.</li>
 </ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>State</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<pre>// --- Context: forwards every operation to the current state ---
+public class PaymentContext {
+    private PaymentState state = new PendingState();
+
+    public void setState(PaymentState state) { this.state = state; }
+
+    public void authorize() { state.authorize(this); }
+    public void capture()   { state.capture(this); }
+    public void refund()    { state.refund(this); }
+    public void cancel()    { state.cancel(this); }
+}</pre>
+<p>Crucially, a concrete state decides the transition: after a successful capture, <code>AuthorizedState</code> tells the context to become <code>CapturedState</code>.</p>` },
+    { title: `Implementation flow`, body: `<p>Operations are delegated, and transitions happen inside the states:</p>
+<ol>
+<li>Caller invokes <code>payment.capture()</code>; the context forwards to <code>currentState.capture(context)</code>.</li>
+<li><code>AuthorizedState.capture()</code> performs the capture and calls <code>context.setState(new CapturedState())</code>.</li>
+<li>Calling <code>capture()</code> again now runs <code>CapturedState.capture()</code>, which throws an <code>IllegalTransition</code> — a double capture is impossible because no code path allows it.</li>
+</ol>
+<pre>public final class PendingState implements PaymentState {
+    @Override
+    public void authorize(PaymentContext payment) {
+        payment.setState(new AuthorizedState());
+    }
+    @Override
+    public void capture(PaymentContext payment) {
+        throw new IllegalStateException("Cannot capture before authorize");
+    }
+    // refund, cancel similarly guarded…
+}
+
+public final class AuthorizedState implements PaymentState {
+    @Override
+    public void capture(PaymentContext payment) {
+        // call gateway, record result…
+        payment.setState(new CapturedState());  // PENDING → CAPTURED
+    }
+}
+
+public final class CapturedState implements PaymentState {
+    @Override
+    public void refund(PaymentContext payment) {
+        // issue refund via gateway…
+        payment.setState(new RefundedState());  // CAPTURED → REFUNDED
+    }
+    @Override
+    public void capture(PaymentContext payment) {
+        throw new IllegalStateException("Already captured");
+    }
+}</pre>
+<p>The set of legal transitions is encoded in which methods each state implements, so the state machine is explicit rather than implied by scattered <code>if (status === ...)</code> checks.</p>` },
+    { title: `State vs Strategy, and trade-offs`, body: `<p>State and <b>Strategy</b> have the same shape — a context delegating to a pluggable object — but differ in who drives change:</p>
+<ul>
+<li><b>Strategy</b>: the <em>client</em> injects an algorithm; strategies ignore each other. "How should I route this payment?"</li>
+<li><b>State</b>: the object <em>transitions itself</em> between states in response to events; states reference one another. "What can I do now that I am CAPTURED?"</li>
+</ul>
+<pre>// Strategy: external injection, no self-transition
+router.setStrategy(new CheapestRouting());
+
+// State: internal transition driven by events
+payment.capture();  // AuthorizedState → CapturedState automatically</pre>
+<p>The pattern eliminates brittle status switches and makes invalid operations fail loudly, at the cost of one class per state and transition logic spread across them. If transitions are complex, document the diagram (the interactive lab makes the legal moves visible) and consider centralizing the transition table in the context.</p>` },
   ],
-  figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="State structure">
-<defs><marker id="fig-state-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">State</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-state-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-state-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-state-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">State — class and integration boundaries</text>
-</svg>`, caption: `Structure of the State pattern — components and data flow in Order Service.` }
-  ],
-  related: [],
-  
-  
-  template: "stateMachine",
-  sim: () => ({
-    note: `Explore State in the payment platform.`,
-    toggles: [{ key: "fix", label: "Valid transitions only", kind: "ok", value: false }],
-    states: (ctx) => [
-      { id: "pending", label: "Pending", x: 200, y: 280, color: C.service },
-      { id: "active", label: "State", x: 500, y: 280, color: C.accent, good: true },
-      { id: "done", label: "Settled", x: 800, y: 280, color: C.ok, good: true },
-      { id: "bad", label: "Invalid", x: 500, y: 420, color: C.err, bad: true },
-    ],
-    currentState: (ctx, t) => {
-      if (!ctx.toggles.fix && (t % 6) > 4) return "bad";
-      return ["pending", "active", "done"][Math.floor((t * 0.35) % 3)];
-    },
-    transitions: [{ from: "pending", to: "active", label: "apply" }, { from: "active", to: "done", label: "commit" }],
-    status: (ctx) => ({ text: ctx.toggles.fix ? "state machine guards flow" : "illegal states possible", cls: ctx.toggles.fix ? "ok" : "err" }),
-  }),
+  related: ["strategy", "command", "memento", "template-method", "two-pc"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
+
 export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
+  return createTopicSim("state", stage, panel, stageEl);
 }

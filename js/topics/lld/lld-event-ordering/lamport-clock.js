@@ -1,104 +1,92 @@
 // @article-v2
-import { mountSimulation } from "../../../sim/controls.js";
-import { C, phaseOf } from "../../../sim/primitives.js";
+// @sim-lab
+import { createTopicSim } from "../../../sim/lab/registry.js";
 
 export const meta = { id: "lamport-clock", title: "Lamport Clock", category: "ordering" };
 
+const LAMPORT_SVG = `<svg viewBox="0 0 720 180" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Lamport clock counters advancing across a message send">
+  <defs><marker id="fig-lamport-clock-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
+  <text x="60" y="45" text-anchor="middle" fill="#5b9dff" font-size="10" font-family="system-ui">P1</text>
+  <text x="60" y="135" text-anchor="middle" fill="#7c5cff" font-size="10" font-family="system-ui">P2</text>
+  <line x1="90" y1="40" x2="690" y2="40" stroke="#93a1bd" stroke-width="1"/>
+  <line x1="90" y1="130" x2="690" y2="130" stroke="#93a1bd" stroke-width="1"/>
+  <g font-family="system-ui" font-size="10">
+    <circle cx="150" cy="40" r="6" fill="#3ddc97"/><text x="150" y="28" text-anchor="middle" fill="#cdd6e8">1</text>
+    <circle cx="260" cy="40" r="6" fill="#3ddc97"/><text x="260" y="28" text-anchor="middle" fill="#cdd6e8">2</text>
+    <circle cx="150" cy="130" r="6" fill="#3ddc97"/><text x="150" y="152" text-anchor="middle" fill="#cdd6e8">1</text>
+    <circle cx="470" cy="130" r="6" fill="#ff6b6b"/><text x="470" y="152" text-anchor="middle" fill="#cdd6e8">max(1,2)+1 = 3</text>
+    <circle cx="600" cy="130" r="6" fill="#3ddc97"/><text x="600" y="152" text-anchor="middle" fill="#cdd6e8">4</text>
+  </g>
+  <line x1="260" y1="46" x2="465" y2="124" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-lamport-clock-arr)"/>
+  <text x="380" y="82" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">message carries ts=2</text>
+  <text x="360" y="172" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">send happens-before receive → send's timestamp is smaller</text>
+</svg>`;
+
 export const content = {
-  oneliner: `Logical ordering counter.`,
-  archetype: "pattern",
-  sections: [
-    { title: `Motivation`, body: `<p>Logical ordering counter.</p>
-<p>Without <b>Lamport Clock</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>Concurrency control prevents conflicting wallet updates. Row-level locks block concurrent writers; version columns enable optimistic retry; distributed locks (Redis, etcd) coordinate cross-service critical sections with fencing tokens.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Lamport Clock</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Lamport Clock</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Lamport Clock</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Lamport Clock</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
-  ],
+  oneliner: `A single per-process counter that assigns timestamps respecting causality — if event A can influence B, then A's timestamp is smaller — giving a consistent total order without synchronized clocks.`,
+  archetype: "concept",
   figures: [
-    { id: "dist-lock", svg: `<svg viewBox="0 0 400 110" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Distributed lock">
-<rect x="40" y="38" width="70" height="36" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/>
-<text x="75" y="60" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Pod A</text>
-<rect x="40" y="78" width="70" height="28" rx="6" fill="#1a2236" stroke="#ff5c6c" stroke-width="1.5"/>
-<text x="75" y="86" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Pod B</text><text x="75" y="106" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">stale</text>
-<rect x="160" y="48" width="90" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="205" y="62" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Redis Lock</text><text x="205" y="82" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">token=42</text>
-<rect x="290" y="38" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="335" y="60" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger</text>
-<text x="200" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Only token holder may write</text>
-</svg>`, caption: `Distributed lock: SET key NX PX with unique token; stale holder rejected via fencing token.` }
+    { id: "lamport-flow", svg: LAMPORT_SVG, caption: "Each process increments its counter per event; a message carries the sender's timestamp, and the receiver jumps to max(local, received) + 1, so a send always gets a smaller timestamp than its receive." },
   ],
-  related: [],
+  sections: [
+    { title: `The happens-before relation`, body: `<p>Leslie Lamport's 1978 insight is that in a distributed system you rarely need to know the <em>real</em> time an event occurred — you need to know which events could have <b>caused</b> which. He defined the <b>happens-before</b> relation (written a → b): a → b if they are on the same process and a comes first, or a is a message send and b is its receive, or by transitivity through a chain of those. If neither a → b nor b → a, the events are <b>concurrent</b> — they could not have influenced each other. Physical clocks cannot capture this because of clock skew; happens-before is about causality, not wall time.</p>` },
+    { title: `How it works`, body: `<p>A Lamport clock is one integer counter per process, and the algorithm is three small rules:</p>
+<ol>
+<li><b>Local event.</b> Before timestamping any event (including a send), increment your counter: <code>C = C + 1</code>.</li>
+<li><b>Send.</b> Attach the current counter value to the outgoing message.</li>
+<li><b>Receive.</b> Set <code>C = max(C, received_ts) + 1</code> before processing. Taking the max lets the receiver "catch up" to a sender that was ahead, so the receive is stamped later than the send.</li>
+</ol>
+<p>The guarantee this produces: <b>if a → b then C(a) &lt; C(b)</b>. Causally-related events always get increasing timestamps, so a smaller timestamp can never belong to an effect of a larger one.</p>
+<pre>// LamportClock — one counter per process
+public final class LamportClock {
+    private final int processId;
+    private int counter;
+
+    public LamportClock(int processId) { this.processId = processId; }
+
+    /** Local event or send: increment before stamping */
+    public Timestamp tick() {
+        counter++;
+        return new Timestamp(counter, processId);
+    }
+
+    /** Receive: jump to max(local, received) + 1 */
+    public Timestamp onReceive(Timestamp received) {
+        counter = Math.max(counter, received.value()) + 1;
+        return new Timestamp(counter, processId);
+    }
+
+    public record Timestamp(int value, int processId)
+        implements Comparable&lt;Timestamp&gt; {
+        @Override public int compareTo(Timestamp other) {
+            int cmp = Integer.compare(value, other.value);
+            return cmp != 0 ? cmp : Integer.compare(processId, other.processId);
+        }
+    }
+}
+
+// Payment service stamps outgoing order events
+public class OrderEventPublisher {
+    private final LamportClock clock;
+    private final EventBus bus;
+
+    public void publishPaid(String orderId) {
+        LamportClock.Timestamp ts = clock.tick();
+        bus.send(new OrderPaidEvent(orderId, ts));
+    }
+
+    public void onShippedReceived(OrderShippedEvent evt) {
+        LamportClock.Timestamp ts = clock.onReceive(evt.lamportTs());
+        applyShipped(evt.orderId(), ts);
+    }
+}</pre>` },
+    { title: `Total order via a tie-break`, body: `<p>Lamport timestamps alone can collide — two concurrent events on different processes may share a value. To get a <b>total order</b> (a single line every process agrees on), break ties with a fixed rule, usually the process id: order by the pair <code>(timestamp, process_id)</code>. This yields a deterministic total order consistent with causality, which is exactly what algorithms like Lamport's mutual-exclusion and totally-ordered multicast need — every node processes requests in the same agreed sequence.</p>` },
+    { title: `The key limitation`, body: `<p>The implication runs one way only. <b>a → b implies C(a) &lt; C(b)</b>, but the converse is false: <code>C(a) &lt; C(b)</code> does <em>not</em> mean a happened before b — they might be concurrent and merely got assigned different numbers. So a Lamport clock can impose an order, but it <b>cannot tell you whether two events were causally related or truly concurrent</b>. When you need to detect concurrency — for conflict detection in a replicated store, deciding whether two writes conflict — you need <b>vector clocks</b>, which track a counter per process and can distinguish "before," "after," and "concurrent."</p>` },
+    { title: `Where it is used`, body: `<p>Lamport clocks are the workhorse behind totally-ordered broadcast, distributed mutual exclusion, and any protocol that needs all nodes to agree on a sequence without a global clock. They are cheap — one integer, one number per message — which is why they underpin more elaborate schemes (hybrid logical clocks combine a Lamport counter with physical time to get causal ordering plus roughly-real timestamps). Reach for a Lamport clock when you need a consistent ordering across nodes; reach for a vector clock when you also need to know what is concurrent.</p>` },
+  ],
+  related: ["vector-clock", "clock-skew", "event-reordering", "out-of-order", "eventual-consistency", "crdt"],
 };
 
 export function createSimulation(stage, panel, stageEl) {
-  return mountSimulation(stage, panel, stageEl, {
-    note: "On receive, clock = max(local, msg) + 1.",
-    frame(ctx, t) {
-      const d = ctx.d;
-      const P = [
-        { id: 0, label: "Order", x: 200, color: C.service },
-        { id: 1, label: "Payment", x: 500, color: C.gateway },
-        { id: 2, label: "Ledger", x: 800, color: C.ledger },
-      ];
-      // scripted events: [proc, kind('local'|'send'|'recv'), from]
-      const events = [
-        { p: 0, k: "local" }, { p: 1, k: "local" },
-        { p: 0, k: "send", to: 1 }, { p: 1, k: "recv", from: 0 },
-        { p: 1, k: "send", to: 2 }, { p: 2, k: "recv", from: 1 },
-        { p: 2, k: "local" }, { p: 2, k: "send", to: 0 }, { p: 0, k: "recv", from: 2 },
-      ];
-      const ph = phaseOf(t, events.map(() => 1.0));
-      // compute clocks up to current revealed event
-      const clocks = [0, 0, 0];
-      const drawn = [];
-      for (let i = 0; i <= ph.i; i++) {
-        const e = events[i];
-        if (e.k === "recv") {
-          // find sender's clock at send time
-          let sc = 0;
-          for (let j = 0; j < i; j++) if (events[j].k === "send" && events[j].to === e.p && events[j].p === e.from) sc = drawn[j].after;
-          clocks[e.p] = Math.max(clocks[e.p], sc) + 1;
-        } else clocks[e.p] += 1;
-        drawn[i] = { after: clocks[e.p] };
-      }
-      // lifelines
-      P.forEach((p) => {
-        d.node(p.x - 70, 30, 140, 52, { title: p.label, color: p.color, active: true, value: "L = " + clocks[p.id] });
-        d.ctx.save(); d.ctx.strokeStyle = C.panelLine; d.ctx.setLineDash([4, 7]);
-        d.ctx.beginPath(); d.ctx.moveTo(p.x, 82); d.ctx.lineTo(p.x, 520); d.ctx.stroke(); d.ctx.restore();
-      });
-      const y0 = 120, rh = 42;
-      for (let i = 0; i <= ph.i && i < events.length; i++) {
-        const e = events[i]; const y = y0 + i * rh; const px = P[e.p].x;
-        const col = e.k === "recv" ? C.ok : P[e.p].color;
-        if (e.k === "send") {
-          const to = P[e.to].x;
-          d.arrow(px, y, to, y + rh, { color: P[e.p].color, width: 2, label: "ts=" + drawn[i].after, progress: i === ph.i ? ph.p : 1 });
-        } else {
-          d.token(px, y, { r: 10, color: col, text: String(drawn[i].after) });
-          d.text(px + 18, y, e.k, { size: 11, color: C.muted, align: "left" });
-        }
-      }
-      ctx.setStatus("a → b implies L(a) < L(b)", "ok");
-    },
-  });
+  return createTopicSim("lamport-clock", stage, panel, stageEl);
 }

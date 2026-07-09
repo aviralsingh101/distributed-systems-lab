@@ -1,7 +1,9 @@
 // @article-v2
+// @sim-lab
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { layerTemplate } from "../../../sim/templates/index.js";
+import { createTopicSim } from "../../../sim/lab/registry.js";
+
+const CQRS_SVG = `<svg viewBox="0 0 560 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="CQRS command and query split"><defs><marker id="fig-cqrs-read-write-models-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs><rect x="14" y="60" width="80" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/><text x="54" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Client</text><rect x="150" y="16" width="110" height="38" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/><text x="205" y="33" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Command</text><text x="205" y="47" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">write model</text><rect x="150" y="106" width="110" height="38" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/><text x="205" y="123" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Query</text><text x="205" y="137" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">read model</text><rect x="320" y="16" width="100" height="38" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/><text x="370" y="39" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">Write store</text><rect x="320" y="106" width="100" height="38" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/><text x="370" y="129" text-anchor="middle" fill="#cdd6e8" font-size="10" font-family="system-ui">Read store</text><line x1="94" y1="72" x2="148" y2="40" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-cqrs-read-write-models-arr)"/><line x1="94" y1="88" x2="148" y2="122" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-cqrs-read-write-models-arr)"/><line x1="260" y1="35" x2="318" y2="35" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-cqrs-read-write-models-arr)"/><line x1="260" y1="125" x2="318" y2="125" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-cqrs-read-write-models-arr)"/><line x1="370" y1="54" x2="370" y2="104" stroke="#7c5cff" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#fig-cqrs-read-write-models-arr)"/><text x="452" y="82" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">async</text><text x="452" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">projection</text></svg>`;
 
 const topic = makeTopic({
   id: "cqrs-read-write-models",
@@ -10,68 +12,89 @@ const topic = makeTopic({
   track: "lld",
   tier: "essential",
   archetype: "pattern",
-  oneliner: `Separate schemas for commands vs queries.`,
+  oneliner: "Split the model that accepts writes from the model that serves reads, so each is shaped and scaled for its own job.",
   sections: [
-    { title: `Motivation`, body: `<p>Separate schemas for commands vs queries.</p>
-<p>Without <b>CQRS Read/Write Models</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>CQRS Read/Write Models</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>CQRS Read/Write Models</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>CQRS Read/Write Models</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>CQRS Read/Write Models</b> changes to production:</p>
+    {
+      title: "The problem: one model, two conflicting jobs",
+      body: `<p>A single domain model must simultaneously enforce write invariants and answer queries. These pull in opposite directions. Writes want a normalized, aggregate-shaped model that guarantees consistency (debit a Wallet only if balance &#8805; amount). Reads want denormalized, query-shaped data (a "customer statement" joining payments, refunds, and fees) served fast without expensive joins.</p>
+<p><b>CQRS</b> (Command Query Responsibility Segregation) resolves this by using <em>two separate models</em>: a <b>command (write) model</b> and a <b>query (read) model</b>. It is not two databases by definition — at minimum it is two code paths — but it commonly extends to two stores.</p>`,
+    },
+    {
+      title: "Structure",
+      figureAfter: "cqrs-flow",
+      body: `<p>The two sides have distinct responsibilities:</p>
 <ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
+<li><b>Command side</b> — accepts commands (<code>CapturePayment</code>), loads the aggregate, checks invariants, and persists changes to the write store. It returns success/failure, not data.</li>
+<li><b>Query side</b> — serves read models (DTOs / projections) tailored to each screen or API, from a store optimized for reading (denormalized tables, a search index, a cache).</li>
 </ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>CQRS Read/Write Models</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<p>The read store is kept up to date by <b>projecting</b> writes into it. The write side emits events (via a <b>transactional outbox</b> or CDC); projection handlers consume them and update the read model.</p>`,
+    },
+    {
+      title: "Implementation flow",
+      body: `<ol>
+<li>A command hits the write model; it validates and commits one local transaction, emitting <code>PaymentCaptured</code>.</li>
+<li>A projector consumes the event and upserts the read model — e.g. increments the customer's <code>total_paid</code> and appends a row to a flattened statement table.</li>
+<li>Queries hit only the read store and never touch the write aggregates.</li>
+</ol>
+<p>Because projection is asynchronous, the read model is <b>eventually consistent</b> with the write model.</p>
+<pre>// --- Write side: command handler + outbox in one transaction ---
+@Service
+public class CapturePaymentHandler {
+    @Transactional
+    public void handle(CapturePaymentCommand cmd) {
+        Payment payment = paymentRepo.save(Payment.capture(cmd));
+        outbox.save(OutboxEntity.of("PaymentCaptured", payment.getId(), payment.toJson()));
+    }
+}
+
+// --- Read side: denormalized statement table (never touched by writes) ---
+@Entity
+@Table(name = "customer_statement_read")
+public class StatementLine {
+    @Id private UUID id;
+    private UUID customerId;
+    private long amountCents;
+    private Instant capturedAt;
+}</pre>
+<pre>// --- Projector: consumes events, upserts read model ---
+@Service
+public class StatementProjector {
+    @KafkaListener(topics = "payment.events", groupId = "statement-projection")
+    @Transactional
+    public void onPaymentCaptured(PaymentCapturedEvent e) {
+        inbox.dedup(e.eventId());
+        statementRepo.save(new StatementLine(e));
+    }
+}
+
+@RestController
+public class StatementQueryController {
+    @GetMapping("/v1/customers/{id}/statement")
+    public List&lt;StatementLine&gt; statement(@PathVariable UUID id) {
+        return statementRepo.findByCustomerIdOrderByCapturedAtDesc(id);
+    }
+}</pre>`,
+    },
+    {
+      title: "The consistency gap you must design for",
+      body: `<p>After a successful command, a client may read a stale value for a short window (the projection lag). This breaks naive "write then immediately read" UX. Mitigations: return the new state directly in the command response; version reads and have the client wait for its own write's version (read-your-writes); or, for a critical screen, read from the write model. Never pretend the lag is zero.</p>
+<p>CQRS pairs naturally with <b>event sourcing</b> (the event log is the write model and projections build read models), but the two are independent — you can do CQRS over ordinary CRUD tables.</p>`,
+    },
+    {
+      title: "Tradeoffs",
+      body: `<p><b>Pros:</b> each side scales and is modeled independently (read replicas, search indexes, caches for the query side); complex reads become simple lookups; write model stays small and invariant-focused.</p>
+<p><b>Cons:</b> more moving parts (projections, event flow, two stores to keep in sync); eventual consistency complicates UX and testing; over-applied to a simple CRUD app it is pure overhead. <b>Use when</b> read and write loads or shapes diverge sharply, or reads vastly outnumber writes; <b>avoid when</b> a single well-indexed table serves both comfortably.</p>`,
+    },
   ],
   figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="CQRS Read/Write Models structure">
-<defs><marker id="fig-cqrs-read-write-models-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">CQRS Read/Write…</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-cqrs-read-write-models-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-cqrs-read-write-models-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-cqrs-read-write-models-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">CQRS Read/Write Models — class and integration boundaries</text>
-</svg>`, caption: `Structure of the CQRS Read/Write Models pattern — components and data flow in Order Service.` }
+    { id: "cqrs-flow", svg: CQRS_SVG, caption: "CQRS: commands go to the write model and store; an asynchronous projection updates a separate read store that queries hit." },
   ],
-  related: [],
-  
-  
-  template: "layer",
-  sim: () => ({
-    note: `Explore CQRS Read/Write Models in the payment platform.`,
-    toggles: [{ key: "fix", label: "Apply layering", kind: "ok", value: false }],
-    layers: (ctx) => [
-      { name: "API", components: [{ title: "REST/gRPC", active: true }] },
-      { name: "Domain", components: [{ title: "CQRS Read/Write Models", active: ctx.toggles.fix, color: C.accent }] },
-      { name: "Data", components: [{ title: "Ledger", color: C.ledger }, { title: "Queue", color: C.queue }] },
-    ],
-    status: (ctx) => ({ text: ctx.toggles.fix ? "clean separation" : "logic leaks across layers", cls: ctx.toggles.fix ? "ok" : "err" }),
-  }),
+  related: ["event-sourcing-projection", "cqrs-handler-separation", "transactional-outbox", "cdc-relay", "denormalization-patterns"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
+
 export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
+  return createTopicSim("cqrs-read-write-models", stage, panel, stageEl);
 }

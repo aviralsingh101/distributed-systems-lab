@@ -1,7 +1,20 @@
 // @article-v2
 import { makeTopic } from "../../_shared/topicFactory.js";
-import { C } from "../../../sim/primitives.js";
-import { pipelineTemplate } from "../../../sim/templates/index.js";
+
+const RS_SVG = `<svg viewBox="0 0 720 170" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Reactive streams backpressure">
+  <defs><marker id="fig-reactive-streams-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
+  <rect x="40" y="60" width="150" height="50" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
+  <text x="115" y="82" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Publisher</text>
+  <text x="115" y="99" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">source of items</text>
+  <rect x="520" y="60" width="150" height="50" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
+  <text x="595" y="82" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Subscriber</text>
+  <text x="595" y="99" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">bounded capacity</text>
+  <line x1="190" y1="75" x2="518" y2="75" stroke="#3ddc97" stroke-width="1.5" marker-end="url(#fig-reactive-streams-arr)"/>
+  <text x="354" y="68" text-anchor="middle" fill="#3ddc97" font-size="10" font-family="system-ui">onNext(item) — at most N in flight</text>
+  <line x1="518" y1="100" x2="192" y2="100" stroke="#7c5cff" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#fig-reactive-streams-arr)"/>
+  <text x="354" y="120" text-anchor="middle" fill="#7c5cff" font-size="10" font-family="system-ui">request(n) — demand signal (pull)</text>
+  <text x="354" y="150" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">consumer controls the rate — no unbounded buffering</text>
+</svg>`;
 
 const topic = makeTopic({
   id: "reactive-streams",
@@ -9,72 +22,66 @@ const topic = makeTopic({
   category: "lld-concurrency",
   track: "lld",
   tier: "advanced",
-  archetype: "pattern",
-  oneliner: `Backpressured async pipelines.`,
+  archetype: "concept",
+  oneliner: `An async data-flow protocol where the consumer signals demand, so a fast producer can never overwhelm a slow consumer.`,
   sections: [
-    { title: `Motivation`, body: `<p>Backpressured async pipelines.</p>
-<p>Without <b>Reactive Streams</b>, Order Service code accrues ad-hoc fixes — duplicate event handlers, tangled dependencies, and untestable static calls that break under parallel payment load.</p>` },
-    { title: `Structure`, body: `<p>In Order Service code, <b>Reactive Streams</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>
-<p>Map the pattern to packages: domain interfaces, infrastructure adapters, and thin HTTP handlers. Unit tests use fakes; integration tests use Testcontainers for Postgres and Kafka.</p>` },
-    { title: `Implementation flow`, body: `<p>Typical charge flow with <b>Reactive Streams</b>:</p>
-<ol>
-<li>HTTP handler validates request and idempotency key.</li>
-<li>Domain service applies business rules inside a transaction boundary.</li>
-<li>Ledger write and optional outbox insert commit atomically.</li>
-<li>Async relay publishes events; consumers deduplicate by <code>event_id</code>.</li>
-</ol>
-<p>Keep broker publish outside the DB transaction — use outbox for reliability.</p>` },
-    { title: `Tradeoffs`, body: `<p><b>Benefits:</b> clearer code structure, testability, and explicit boundaries between Wallet, Gateway, and Queue integration.</p>
-<p><b>Costs:</b> more classes and indirection; team must understand the pattern; misuse (pattern for pattern's sake) adds complexity without solving a real problem.</p>
-<p><b>Use when:</b> the problem shape matches what <b>Reactive Streams</b> was designed for and simpler code is failing reviews or incidents.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Reactive Streams</b> changes to production:</p>
+    { title: `The problem: fast producer, slow consumer`, body: `<p>Streaming data asynchronously is easy until the producer is faster than the consumer. A pure <b>push</b> model (producer calls <code>onNext</code> whenever it likes) forces the consumer to buffer the overflow — and an unbounded buffer eventually exhausts memory. A pure <b>pull</b> model wastes time polling. <b>Reactive Streams</b> is a small standard protocol that solves this with demand-driven flow control called <b>backpressure</b>.</p>` },
+    { title: `How the protocol works`, figureAfter: "rs", body: `<p>The contract has four interfaces. A <b>Publisher</b> produces items. A <b>Subscriber</b> consumes them via callbacks <code>onSubscribe</code>, <code>onNext</code>, <code>onError</code>, <code>onComplete</code>. A <b>Subscription</b> connects them and carries the crucial method <code>request(n)</code>. A <b>Processor</b> is both.</p>
+<p>The flow is <b>push with pull-based demand</b>: the subscriber calls <code>request(n)</code> to say "I can handle n more items"; the publisher may then emit <em>at most</em> n <code>onNext</code> calls before waiting for more demand. The consumer, not the producer, sets the pace. Items in flight are bounded by outstanding demand, so no component is forced to buffer without limit.</p>
+<pre>// JDK Flow.Publisher: stream settled payments to a reconciliation subscriber
+public final class SettledPaymentPublisher implements Flow.Publisher&lt;PaymentSettlement&gt; {
+    private final List&lt;PaymentSettlement&gt; settlements;
+
+    @Override
+    public void subscribe(Flow.Subscriber&lt;? super PaymentSettlement&gt; subscriber) {
+        subscriber.onSubscribe(new SettlementSubscription(settlements, subscriber));
+    }
+}
+
+static class SettlementSubscription implements Flow.Subscription {
+    private final Iterator&lt;PaymentSettlement&gt; source;
+    private final Flow.Subscriber&lt;? super PaymentSettlement&gt; subscriber;
+    private long demand = 0;
+    private boolean done = false;
+
+    @Override
+    public synchronized void request(long n) {
+        demand += n;
+        while (demand &gt; 0 &amp;&amp; source.hasNext()) {
+            subscriber.onNext(source.next());
+            demand--;
+        }
+        if (!source.hasNext() &amp;&amp; !done) {
+            done = true;
+            subscriber.onComplete();
+        }
+    }
+
+    @Override public void cancel() { done = true; }
+}</pre>` },
+    { title: `Backpressure strategies`, body: `<p>When a source is inherently faster than demand allows (sensor readings, a firehose topic), the pipeline needs a strategy for the excess:</p>
 <ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Reactive Streams</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<li><b>Buffer</b> — hold overflow up to a bound, then fail or block.</li>
+<li><b>Drop / latest</b> — discard the oldest or keep only the most recent value (fine for gauges and live prices).</li>
+<li><b>Throttle / sample / conflate</b> — reduce the rate by time or by merging.</li>
+<li><b>Block the source</b> — only possible when the source itself is pull-based (e.g. reading a file or a database cursor).</li>
+</ul>` },
+    { title: `Where it fits`, body: `<p>Libraries such as Project Reactor, RxJava, and Akka Streams implement the standard; it also underlies the JDK <code>Flow</code> API. It shines for composable async pipelines — streaming query results, event processing, service-to-service streaming over HTTP/2 or gRPC — where operators (<code>map</code>, <code>filter</code>, <code>flatMap</code>, <code>buffer</code>) express the dataflow declaratively while backpressure is threaded through automatically. It is overkill for simple request/response work. Note the distinction between <b>hot</b> sources (emit regardless of subscribers, e.g. live events) and <b>cold</b> sources (produce per-subscription, e.g. a database read) — hot sources need an explicit backpressure strategy because they cannot simply slow down.</p>
+<pre>// Reactor pipeline: charge events → filter → batch → ledger write
+Flux.from(settledPaymentPublisher)
+    .filter(s -&gt; s.amount().currency().equals("USD"))
+    .bufferTimeout(100, Duration.ofSeconds(1))  // backpressure via buffer bound
+    .flatMap(batch -&gt; ledgerService.recordBatch(batch), 4) // max 4 in-flight batches
+    .doOnError(ex -&gt; metrics.increment("ledger.write.failures"))
+    .subscribe();
+
+public record PaymentSettlement(String paymentId, Money amount, Instant settledAt) {}</pre>` },
   ],
   figures: [
-    { id: "structure", svg: `<svg viewBox="0 0 480 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Reactive Streams structure">
-<defs><marker id="fig-reactive-streams-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>
-<rect x="30" y="60" width="100" height="40" rx="6" fill="#1a2236" stroke="#9aa7c7" stroke-width="1.5"/>
-<text x="80" y="84" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">HTTP Handler</text>
-<rect x="170" y="60" width="110" height="40" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>
-<text x="225" y="74" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Reactive Streams</text><text x="225" y="94" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pattern</text>
-<rect x="320" y="30" width="90" height="36" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>
-<text x="365" y="52" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Ledger DB</text>
-<rect x="320" y="95" width="90" height="36" rx="6" fill="#1a2236" stroke="#ffb454" stroke-width="1.5"/>
-<text x="365" y="117" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Event Queue</text>
-<line x1="130" y1="80" x2="168" y2="80" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-reactive-streams-arr)"/>
-<line x1="280" y1="70" x2="318" y2="48" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-reactive-streams-arr)"/>
-<line x1="280" y1="90" x2="318" y2="113" stroke="#5b9dff" stroke-width="1.5" marker-end="url(#fig-reactive-streams-arr)"/>
-<text x="240" y="22" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">Reactive Streams — class and integration boundaries</text>
-</svg>`, caption: `Structure of the Reactive Streams pattern — components and data flow in Order Service.` }
+    { id: "rs", svg: RS_SVG, caption: "The subscriber signals demand with request(n); the publisher emits at most that many items, so the consumer sets the rate." },
   ],
-  related: [],
-  
-  
-  template: "pipeline",
-  sim: () => ({
-    note: `Explore Reactive Streams in the payment platform.`,
-    toggles: [{ key: "fix", label: "Enable Reactive Streams", kind: "ok", value: false }],
-    stages: (ctx) => [
-      { title: "Client", color: C.client },
-      { title: "Order", color: C.service },
-      { title: "Reactive Streams", color: ctx.toggles.fix ? C.ok : C.warn },
-      { title: "Ledger", color: C.ledger },
-      { title: "Queue", color: C.queue },
-    ],
-    activeIndex: (ctx, t) => ctx.toggles.fix ? Math.min(4, Math.floor(t * 0.6) % 5) : Math.min(2, Math.floor(t * 0.6) % 3),
-    status: (ctx) => ({ text: ctx.toggles.fix ? "pipeline complete" : "bottleneck mid-pipeline", cls: ctx.toggles.fix ? "ok" : "warn" }),
-  }),
+  related: ["producer-consumer", "actor-model", "threads-vs-async"],
 });
 
 export const meta = topic.meta;
 export const content = topic.content;
-export function createSimulation(stage, panel, stageEl) {
-  return topic.createSimulation(stage, panel, stageEl);
-}
