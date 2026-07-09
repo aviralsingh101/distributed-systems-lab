@@ -1,5 +1,5 @@
 // @article-v2
-import { makeTopic } from "../../_shared/topicFactory.js";
+import { makeTopic } from "../../shared/topicFactory.js";
 
 const AGG_SVG = `<svg viewBox="0 0 720 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Aggregate consistency boundary">
   <defs><marker id="fig-aggregate-root-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>

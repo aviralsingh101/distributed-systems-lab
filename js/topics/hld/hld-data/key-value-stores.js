@@ -1,5 +1,5 @@
 // @article-v2
-import { makeTopic } from "../../_shared/topicFactory.js";
+import { makeTopic } from "../../shared/topicFactory.js";
 import { dataModelTemplate } from "../../../sim/templates/index.js";
 
 const topic = makeTopic({

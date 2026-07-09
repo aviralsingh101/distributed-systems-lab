@@ -1,5 +1,5 @@
 // @article-v2
-import { makeTopic } from "../../_shared/topicFactory.js";
+import { makeTopic } from "../../shared/topicFactory.js";
 
 const TXB_SVG = `<svg viewBox="0 0 640 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="A transaction boundary wrapping local writes, with the external gateway call kept outside">
   <rect x="30" y="45" width="330" height="120" rx="8" fill="none" stroke="#3ddc97" stroke-width="1.6" stroke-dasharray="6 4"/>

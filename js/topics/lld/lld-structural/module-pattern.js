@@ -1,5 +1,5 @@
 // @article-v2
-import { makeTopic } from "../../_shared/topicFactory.js";
+import { makeTopic } from "../../shared/topicFactory.js";
 
 const SCOPE_SVG = `<svg viewBox="0 0 540 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Module pattern closure scope">
   <defs><marker id="fig-module-pattern-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>

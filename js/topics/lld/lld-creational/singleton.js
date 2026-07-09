@@ -1,7 +1,7 @@
 // @article-v2
 // @sim-lab
 // @figure-handcrafted
-import { makeTopic } from "../../_shared/topicFactory.js";
+import { makeTopic } from "../../shared/topicFactory.js";
 import { createTopicSim } from "../../../sim/lab/registry.js";
 
 const SINGLETON_SVG = `<svg viewBox="0 0 520 140" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Singleton instance sharing">

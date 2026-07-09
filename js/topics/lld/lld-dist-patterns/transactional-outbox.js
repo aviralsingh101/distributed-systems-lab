@@ -1,7 +1,7 @@
 // @article-v2
 // @sim-lab
 // @figure-handcrafted
-import { makeTopic, paymentFlow, actors } from "../../_shared/topicFactory.js";
+import { makeTopic, paymentFlow, actors } from "../../shared/topicFactory.js";
 import { createTopicSim } from "../../../sim/lab/registry.js";
 
 const topic = makeTopic({

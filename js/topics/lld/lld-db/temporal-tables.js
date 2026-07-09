@@ -1,5 +1,5 @@
 // @article-v2
-import { makeTopic } from "../../_shared/topicFactory.js";
+import { makeTopic } from "../../shared/topicFactory.js";
 
 const TEMPORAL_SVG = `<svg viewBox="0 0 640 170" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="A row versioned over valid-time periods on a timeline">
   <line x1="40" y1="120" x2="600" y2="120" stroke="#93a1bd" stroke-width="1.2"/>

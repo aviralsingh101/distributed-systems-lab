@@ -1,6 +1,6 @@
 // @article-v2
 // @sim-lab
-import { makeTopic } from "../../_shared/topicFactory.js";
+import { makeTopic } from "../../shared/topicFactory.js";
 import { createTopicSim } from "../../../sim/lab/registry.js";
 
 const BTREE_SVG = `<svg viewBox="0 0 640 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="B-tree index descending from root to leaf pages">

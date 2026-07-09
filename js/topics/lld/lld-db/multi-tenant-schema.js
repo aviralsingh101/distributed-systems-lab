@@ -1,5 +1,5 @@
 // @article-v2
-import { makeTopic } from "../../_shared/topicFactory.js";
+import { makeTopic } from "../../shared/topicFactory.js";
 
 const MT_SVG = `<svg viewBox="0 0 660 180" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Three multi-tenant isolation models: shared table, schema per tenant, database per tenant">
   <rect x="20" y="30" width="190" height="120" rx="6" fill="#1a2236" stroke="#3ddc97" stroke-width="1.5"/>

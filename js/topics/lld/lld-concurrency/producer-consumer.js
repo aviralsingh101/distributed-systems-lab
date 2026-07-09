@@ -1,6 +1,6 @@
 // @article-v2
 // @sim-lab
-import { makeTopic } from "../../_shared/topicFactory.js";
+import { makeTopic } from "../../shared/topicFactory.js";
 import { createTopicSim } from "../../../sim/lab/registry.js";
 
 const PC_SVG = `<svg viewBox="0 0 720 170" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Producer consumer bounded buffer">

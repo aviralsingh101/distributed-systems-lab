@@ -1,6 +1,6 @@
 // @article-v2
 // @sim-lab
-import { makeTopic } from "../../_shared/topicFactory.js";
+import { makeTopic } from "../../shared/topicFactory.js";
 import { createTopicSim } from "../../../sim/lab/registry.js";
 
 const OUTBOX_SVG = `<svg viewBox="0 0 720 180" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Outbox on the producer, inbox on the consumer">

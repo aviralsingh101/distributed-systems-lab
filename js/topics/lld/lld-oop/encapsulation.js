@@ -1,5 +1,5 @@
 // @article-v2
-import { makeTopic } from "../../_shared/topicFactory.js";
+import { makeTopic } from "../../shared/topicFactory.js";
 
 const CLASS_SVG = `<svg viewBox="0 0 460 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Encapsulated Wallet class">
   <rect x="120" y="20" width="220" height="160" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/>

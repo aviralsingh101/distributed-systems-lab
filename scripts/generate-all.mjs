@@ -193,7 +193,7 @@ function generateTopicFile(track, catId, t) {
   const simBody = simForTemplate(t.template, t);
   const related = (t.related || []).map((r) => `"${r}"`).join(", ");
 
-  return `import { makeTopic } from "../../_shared/topicFactory.js";
+  return `import { makeTopic } from "../../shared/topicFactory.js";
 import { C } from "../../../sim/primitives.js";
 import { ${t.template === "flow" ? "flowTemplate" : t.template + "Template"} } from "../../../sim/templates/index.js";
 

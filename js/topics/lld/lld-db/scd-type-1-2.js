@@ -1,5 +1,5 @@
 // @article-v2
-import { makeTopic } from "../../_shared/topicFactory.js";
+import { makeTopic } from "../../shared/topicFactory.js";
 
 const SCD_SVG = `<svg viewBox="0 0 660 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="SCD type 1 overwrite versus type 2 new versioned row">
   <text x="165" y="24" text-anchor="middle" fill="#cdd6e8" font-size="12" font-weight="600" font-family="system-ui">Type 1 — overwrite</text>

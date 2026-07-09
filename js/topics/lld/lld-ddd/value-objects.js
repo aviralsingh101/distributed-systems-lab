@@ -1,5 +1,5 @@
 // @article-v2
-import { makeTopic } from "../../_shared/topicFactory.js";
+import { makeTopic } from "../../shared/topicFactory.js";
 
 const VO_SVG = `<svg viewBox="0 0 720 170" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Entity identity vs value equality">
   <rect x="40" y="35" width="290" height="110" rx="10" fill="none" stroke="#5b9dff" stroke-width="1.6"/>

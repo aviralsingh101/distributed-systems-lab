@@ -1,5 +1,5 @@
 // @article-v2
-import { makeTopic } from "../../_shared/topicFactory.js";
+import { makeTopic } from "../../shared/topicFactory.js";
 
 const FLY_SVG = `<svg viewBox="0 0 580 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Flyweight sharing">
   <defs><marker id="fig-flyweight-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b9dff"/></marker></defs>

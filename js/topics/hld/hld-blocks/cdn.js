@@ -1,6 +1,6 @@
 // @article-v2
 // @sim-lab
-import { makeTopic } from "../../_shared/topicFactory.js";
+import { makeTopic } from "../../shared/topicFactory.js";
 import { createTopicSim } from "../../../sim/lab/registry.js";
 import { topologyTemplate } from "../../../sim/templates/index.js";
 
