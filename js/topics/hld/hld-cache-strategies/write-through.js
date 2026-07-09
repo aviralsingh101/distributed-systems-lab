@@ -1,40 +1,60 @@
 // @article-v2
 // @sim-lab
-import { sequenceSim } from "../../../sim/sequence.js";
 import { createTopicSim } from "../../../sim/lab/registry.js";
-import { C } from "../../../sim/primitives.js";
 
 export const meta = { id: "write-through", title: "Write Through", category: "cache" };
 
 export const content = {
-  oneliner: `DB + cache together.`,
+  oneliner: `Every write updates DB and cache together — the cache layer (or app) keeps both in sync on the write path.`,
   archetype: "concept",
   sections: [
-    { title: `What is Write Through?`, body: `<p><b>Write Through</b> — DB + cache together.</p>
-<p>In the payment platform topology, <b>Write Through</b> sits on the request or data path between Client/Order and shared infrastructure (Gateway, Ledger, Queue). Draw it explicitly on architecture diagrams with failure domains marked.</p>
-<p>Unlike a generic "best practice" label, it has a specific seat in the payment platform architecture with defined inputs, outputs, and failure modes.</p>` },
-    { title: `How it works`, body: `<p>At runtime, components interact in a defined order with configurable timeouts, health checks, and backoff policies. Trace a single <code>POST /v1/charge</code> with <code>X-Request-ID</code> to see where <b>Write Through</b> applies.</p>
-<p>Configuration lives in infrastructure-as-code (Terraform, Helm) or edge config (nginx, Envoy, Cloudflare). Changes propagate through deploy pipelines — treat config drift as an incident precursor.</p>
-<p>Capacity planning: measure peak QPS, payload size, and fan-out before scaling horizontally. Tail latency (p99) often reveals misconfiguration before mean latency moves.</p>` },
-    { title: `In production`, body: `<p>Operate with dashboards: error rate, p99 latency, saturation, and dependency health. Runbooks cover failover, key rotation, and rollback. Game-day exercises validate that <b>Write Through</b> behaves correctly during AZ failure or broker restart.</p>
-<p>Security: TLS on public paths; no PAN in application logs; audit admin APIs that change <b>Write Through</b> configuration.</p>` },
-    { title: `Common mistakes`, body: `<ul>
-<li>Deploying without measuring the problem the component solves.</li>
-<li>Missing health checks — traffic routes to broken backends until manual intervention.</li>
-<li>Ignoring cache TTL and DNS caching during migrations.</li>
-<li>Operating without correlation IDs across Order → Gateway → Ledger.</li>
-</ul>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Write Through</b> changes to production:</p>
+    {
+      title: "What is write-through?",
+      body: `<p>In <b>write-through</b>, a write request updates the database <em>and</em> the cache before returning success to the client. Reads always hit cache first; cache is kept warm with fresh values on every write.</p>
+<p>Contrast with cache-aside, where the app writes DB then invalidates — write-through <em>updates</em> cache instead of deleting keys.</p>`,
+    },
+    {
+      title: "Write path",
+      body: `<pre>POST /debit
+  1. UPDATE wallets SET balance = 450 WHERE id = 42   (DB)
+  2. SET wallet:42 '{"balance":450}' EX 300           (cache)
+  3. return 200</pre>
+<p>Implementation options:</p>
 <ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
+<li><b>App-level</b> — service code calls DB then Redis in sequence (still dual-write unless coordinated).</li>
+<li><b>Cache product</b> — some caches or sidecars accept writes and persist to backing store (rare for custom Postgres schemas).</li>
 </ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Write Through</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<p>Reads after write are fast cache hits with the new value — when both steps succeed.</p>`,
+    },
+    {
+      title: "When cache write fails",
+      body: `<p>Same dual-write trap as cache-aside: DB commits, Redis <code>SET</code> times out.</p>
+<ul>
+<li><b>Fallback to invalidation</b> — if <code>SET</code> fails, attempt <code>DEL wallet:42</code> so the next read loads from DB instead of serving an old cached value.</li>
+<li><b>Do not rollback DB</b> — payment already recorded.</li>
+<li><b>Retry async</b> — outbox or queue job to SET/DEL until cache acks.</li>
+<li><b>Return 200 with warning metric</b> — client sees success; ops alerts on cache write failure rate.</li>
+</ul>
+<p>Write-through does not eliminate dual-write — it only changes failure mode from "stale hit" (if you SET wrong/old value) to "stale hit" (if SET fails and old entry remains). Invalidation fallback converges to cache-aside behavior on error.</p>`,
+    },
+    {
+      title: "Tradeoffs",
+      body: `<p><b>Pros:</b> predictable read latency after write; no miss storm on hot keys immediately after update; good for read-heavy entities written infrequently.</p>
+<p><b>Cons:</b> every write pays cache latency; wasted work if data is never read again (write-around may be cheaper); dual-write consistency still requires retry/TTL/reconciliation; large objects bloat cache.</p>
+<p><b>Use when:</b> entity is read often after write (session, cart, live balance display); cache and DB schemas align 1:1.</p>
+<p><b>Avoid when:</b> write-heavy audit logs; values too large for Redis; you cannot operate invalidation retries.</p>`,
+    },
+    {
+      title: "Production checklist",
+      body: `<ul>
+<li>Define behavior when cache write fails: DEL + retry, not silent success</li>
+<li>Keep cached JSON schema in sync with DB migrations</li>
+<li>Compare write-through vs write-around for write-only tables</li>
+<li>Cross-link Cache Consistency for incident playbooks</li>
+</ul>`,
+    },
   ],
-  related: [],
+  related: ["cache-aside", "write-around", "write-back", "cache-consistency", "db-cache-dual-write"],
 };
 
 export function createSimulation(stage, panel, stageEl) {

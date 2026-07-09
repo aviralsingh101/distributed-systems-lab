@@ -1839,6 +1839,13 @@
       "title": "Transactional Outbox",
       "priority": "gold"
     },
+    "db-cache-dual-write": {
+      "sim": "clickFlow",
+      "figure": "none",
+      "track": "lld",
+      "category": "lld-dist-patterns",
+      "title": "DB + Cache Dual Write"
+    },
     "inbox-pattern": {
       "sim": "clickFlow",
       "figure": "none",

@@ -1,42 +1,67 @@
 // @article-v2
 // @sim-lab
-import { sequenceSim } from "../../../sim/sequence.js";
 import { createTopicSim } from "../../../sim/lab/registry.js";
-import { C } from "../../../sim/primitives.js";
 
 export const meta = { id: "cache-invalidation", title: "Cache Invalidation", category: "cache" };
 
 export const content = {
-  oneliner: `The hardest problem.`,
+  oneliner: `Stale cache entries after writes — invalidate on write, or pay the cost in wrong balances and angry users.`,
   archetype: "failure",
   sections: [
-    { title: `Symptom`, body: `<p>The hardest problem. In production this surfaces as customer-visible errors, reconciliation drift, or SLO burn without an obvious code exception — support tickets reference wrong balances, duplicate charges, or timeouts during peak checkout.</p>
-<p>Metrics to watch: error rate spike on affected endpoints, p99 latency increase, consumer lag, or reconciliation job failures comparing Ledger totals to Wallet projections.</p>` },
-    { title: `Root cause`, body: `<p><b>Cache Invalidation</b> occurs when the system assumes single-threaded or always-success execution. Under parallel charges, retries, or partial outages, that assumption breaks.</p>
-<p>Edge caches store responses closer to clients. Cache keys typically include hostname, path, and query string. Purge APIs and short TTLs on dynamic payment status endpoints prevent stale balance displays.</p>
-<p>Default database isolation (Read Committed) and naive application patterns do not prevent this without explicit design — the bug is often invisible in unit tests.</p>` },
-    { title: `How the failure unfolds`, body: `<p>Two or more workers interleave operations on the same wallet or shared resource. Each step looks valid in isolation; the combined timeline violates an invariant (balance, idempotency, ordering, or lock discipline).</p>
-<p>Reproduce with parallel load tests on the same <code>wallet_id</code> — low concurrency in dev hides the race until Black Friday traffic.</p>` },
-    { title: `Fixes`, body: `<p>Choose a fix matching contention and UX:</p>
+    {
+      title: "Symptom",
+      body: `<p>Users see outdated payment status, old shipping addresses, or wallet balances that don't match receipts. Purging CDN or Redis "fixes" it temporarily. Incidents cluster after deploys that change response shape but not cache keys.</p>
+<p>Phil Greenspun's joke applies: cache invalidation is one of the two hard problems in computer science (naming things and off-by-one errors being the others).</p>`,
+    },
+    {
+      title: "Root cause",
+      body: `<p>Cached data outlived the truth in the database because nothing told the cache the row changed. Common triggers:</p>
 <ul>
-<li><b>Atomic operations</b> — express updates in single SQL statements where possible (<code>UPDATE ... SET x = x + ?</code>).</li>
-<li><b>Explicit locking</b> — <code>SELECT ... FOR UPDATE</code> or distributed lock with fencing token for cross-service sections.</li>
-<li><b>Idempotency</b> — deduplicate retried requests with <code>Idempotency-Key</code> and unique constraints.</li>
-<li><b>Isolation upgrade</b> — Serializable or explicit version columns with bounded retry on conflict.</li>
+<li><b>Missing invalidation on write</b> — developer added <code>UPDATE</code> but forgot <code>DEL</code></li>
+<li><b>Wrong key scope</b> — invalidated <code>user:42</code> but list cache <code>users:page:1</code> still stale</li>
+<li><b>TTL-only strategy</b> — no explicit purge; users see wrong data until expiry</li>
+<li><b>Partial fan-out</b> — multi-node cache; invalidation message lost on one node</li>
+</ul>`,
+    },
+    {
+      title: "Invalidation-on-write (primary strategy)",
+      body: `<p>For cache-aside, the standard write path is:</p>
+<pre>COMMIT business transaction
+DEL affected keys (or tag-based purge)
+OPTIONAL: publish invalidation event for edge/CDN</pre>
+<p><b>Key design:</b> one helper per aggregate — <code>invalidateWallet(id)</code> deletes <code>wallet:{id}</code>, <code>wallet:{id}:transactions:summary</code>, and publishes to a pub/sub channel if other services cache the same entity.</p>
+<p><b>Tag / version invalidation:</b> store <code>cache-gen:wallet:42 = 7</code>; cached entries include <code>gen:7</code>. On write, increment gen — old entries miss without enumerating every key.</p>
+<p>If invalidation fails, treat it as a production incident path — metric, retry, do not assume TTL will save you on financial keys.</p>`,
+    },
+    {
+      title: "Other invalidation tactics",
+      body: `<ul>
+<li><b>TTL</b> — simple; bounded staleness only. Use as safety net, not sole strategy for balances.</li>
+<li><b>Write-through / write-around</b> — shift when cache updates (see Write Through, Write Around).</li>
+<li><b>Event-driven purge</b> — CDC or domain events trigger cache workers (scales to many consumers).</li>
+<li><b>CDN purge API</b> — path or tag purge after deploy; respect propagation delay.</li>
+</ul>`,
+    },
+    {
+      title: "Fixes and prevention",
+      body: `<ul>
+<li>Audit all write paths in code review — "what cache keys does this touch?"</li>
+<li>Integration tests: write → assert key absent or version bumped</li>
+<li>Reconciliation cron: random sample compare cache vs DB</li>
+<li>Alert on invalidation queue depth and failure rate</li>
 </ul>
-<p>Document the chosen fix in the service runbook and add an integration test that fails without it.</p>` },
-    { title: `Prevention`, body: `<p>Add alerts before customers notice: reconciliation jobs, conflict counters, lock wait time p99, retry rate dashboards. Run game-days with parallel charge scripts. Code review checklist: no read-modify-write without version check; no external HTTP inside DB transactions; lock ordering documented.</p>` },
-    { title: `Production checklist`, body: `<p>Before shipping <b>Cache Invalidation</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>Cache Invalidation</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>` }
+<p>When invalidation lags under load (burst of writes), readers see stale data until purge catches up — the sim models this fan-out pressure.</p>`,
+    },
+    {
+      title: "Production checklist",
+      body: `<ul>
+<li>Document key catalog and invalidation map per service</li>
+<li>Never ship a new cached endpoint without a matching write-path invalidation</li>
+<li>Runbook: emergency purge by key prefix; link to Cache Consistency for dual-write failures</li>
+</ul>`,
+    },
   ],
-  related: [],
+  related: ["cache-aside", "cache-consistency", "write-through", "db-cache-dual-write", "cache-stampede"],
 };
 
 export function createSimulation(stage, panel, stageEl) {

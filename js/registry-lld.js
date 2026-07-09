@@ -325,6 +325,13 @@ export const LLD_CATEGORIES = [
         "related": []
       },
       {
+        "id": "db-cache-dual-write",
+        "title": "DB + Cache Dual Write",
+        "blurb": "DB + cache have no shared txn — invalidate via outbox-style relay.",
+        "tier": "hidden-gem",
+        "related": []
+      },
+      {
         "id": "inbox-pattern",
         "title": "Inbox / Idempotent Consumer",
         "blurb": "Dedup incoming messages safely.",

@@ -39,7 +39,7 @@
     "indexing-strategies": "algorithm"
   },
   "lldDistPatternsInteractive": [
-    "saga-choreography", "saga-orchestration", "transactional-outbox", "inbox-pattern",
+    "saga-choreography", "saga-orchestration", "transactional-outbox", "db-cache-dual-write", "inbox-pattern",
     "cqrs-read-write-models", "event-sourcing-projection", "cdc-relay", "competing-consumers", "process-manager"
   ],
   "lldAsyncInteractive": ["dead-letter-pattern", "backpressure-pattern", "pub-sub-pattern", "work-queue", "outbox-inbox-combo"],

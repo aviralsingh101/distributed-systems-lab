@@ -1276,6 +1276,66 @@ export function buildClickFlowConfig(topicId, title) {
       },
       status: (ctx) => ({ text: ctx.state.lastResult === "failed" ? "Send failed — connection closed" : ctx.state.lastResult === "delivered" ? "Message pushed over WebSocket" : "Click Send message", cls: ctx.state.lastResult === "failed" ? "err" : ctx.state.lastResult ? "ok" : "" }),
     },
+    "db-cache-dual-write": {
+      note: "Debit wallet: DB commits, then cache invalidation. Toggle cache failure to see stale read.",
+      toggles: [{ key: "cacheFail", label: "Redis DEL fails", kind: "err", value: false }],
+      components: [
+        { id: "app", x: 70, y: 220, title: "Wallet API", color: C.client },
+        { id: "db", x: 280, y: 150, title: "Ledger", color: C.ledger, kind: "db" },
+        { id: "cache", x: 280, y: 300, title: "Redis", color: C.accent },
+        { id: "reader", x: 520, y: 220, title: "GET /balance", color: C.service },
+      ],
+      initialValues: { db: "$500", cache: "$500 cached", reader: "—" },
+      init(ctx) {
+        ctx.state.debited = false;
+      },
+      actions: [
+        {
+          id: "debit",
+          label: "POST debit $50",
+          primary: true,
+          flowKey: "debit",
+          onClick(ctx) {
+            ctx.state.debited = true;
+          },
+        },
+        {
+          id: "read",
+          label: "GET balance",
+          flowKey: "read",
+          disabled: (ctx) => !ctx.state.debited,
+          onClick() {},
+        },
+      ],
+      flows: {
+        debit: (ctx) => [
+          { from: "app", to: "db", set: { db: "$450 ✓" } },
+          ...(ctx.toggles.cacheFail
+            ? [{ from: "app", to: "cache", color: C.err, set: { cache: "DEL failed ✗" } }]
+            : [{ from: "app", to: "cache", set: { cache: "DEL wallet:42" } }]),
+        ],
+        read: (ctx) => [
+          {
+            from: "reader",
+            to: "cache",
+            color: ctx.toggles.cacheFail ? C.err : C.ok,
+            set: {
+              cache: ctx.toggles.cacheFail ? "HIT $500" : "MISS → DB",
+              reader: ctx.toggles.cacheFail ? "$500 STALE" : "$450 ✓",
+            },
+          },
+        ],
+      },
+      status: (ctx) => {
+        if (ctx.state.values.reader?.includes("STALE")) {
+          return { text: "Stale read — cache not invalidated after DB commit", cls: "err" };
+        }
+        if (ctx.state.debited && ctx.state.values.reader?.includes("450")) {
+          return { text: "Consistent — cache miss loaded fresh balance from DB", cls: "ok" };
+        }
+        return { text: "Debit wallet, then read balance", cls: "" };
+      },
+    },
     "cache-aside": {
       note: "Read key — cache miss goes to DB, hit serves from cache.",
       toggles: [{ key: "warmCache", label: "Key in cache", kind: "ok", value: false }],

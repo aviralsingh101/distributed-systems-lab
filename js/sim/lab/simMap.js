@@ -610,7 +610,7 @@ export const SIM_MAP = {
   },
   "consensus-raft-paxos": {
     "lab": "state",
-    "figure": "none",
+    "figure": "consensus",
     "priority": "hld",
     "category": "hld-theory",
     "track": "hld",
@@ -626,7 +626,7 @@ export const SIM_MAP = {
   },
   "quorum-reads-writes": {
     "lab": "state",
-    "figure": "none",
+    "figure": "quorum",
     "priority": "hld",
     "category": "hld-theory",
     "track": "hld",
@@ -650,7 +650,7 @@ export const SIM_MAP = {
   },
   "hybrid-logical-clocks": {
     "lab": "none",
-    "figure": "comparison",
+    "figure": "none",
     "priority": "hld",
     "category": "hld-theory",
     "track": "hld",
@@ -658,7 +658,7 @@ export const SIM_MAP = {
   },
   "crdt-overview": {
     "lab": "none",
-    "figure": "comparison",
+    "figure": "none",
     "priority": "hld",
     "category": "hld-theory",
     "track": "hld",
@@ -674,7 +674,7 @@ export const SIM_MAP = {
   },
   "exactly-once-honesty": {
     "lab": "none",
-    "figure": "comparison",
+    "figure": "none",
     "priority": "hld",
     "category": "hld-theory",
     "track": "hld",
@@ -682,7 +682,7 @@ export const SIM_MAP = {
   },
   "phi-accrual-failure-detection": {
     "lab": "none",
-    "figure": "comparison",
+    "figure": "none",
     "priority": "hld",
     "category": "hld-theory",
     "track": "hld",
@@ -690,7 +690,7 @@ export const SIM_MAP = {
   },
   "consistent-hashing-placement": {
     "lab": "algorithm",
-    "figure": "none",
+    "figure": "hashRing",
     "priority": "hld",
     "category": "hld-theory",
     "track": "hld",
@@ -698,7 +698,7 @@ export const SIM_MAP = {
   },
   "merkle-anti-entropy": {
     "lab": "none",
-    "figure": "comparison",
+    "figure": "none",
     "priority": "hld",
     "category": "hld-theory",
     "track": "hld",
@@ -738,7 +738,7 @@ export const SIM_MAP = {
   },
   "cdc": {
     "lab": "none",
-    "figure": "comparison",
+    "figure": "none",
     "priority": "hld",
     "category": "hld-data",
     "track": "hld",
@@ -746,7 +746,7 @@ export const SIM_MAP = {
   },
   "search-inverted-index": {
     "lab": "none",
-    "figure": "comparison",
+    "figure": "none",
     "priority": "hld",
     "category": "hld-data",
     "track": "hld",
@@ -754,7 +754,7 @@ export const SIM_MAP = {
   },
   "time-series-db": {
     "lab": "none",
-    "figure": "comparison",
+    "figure": "none",
     "priority": "hld",
     "category": "hld-data",
     "track": "hld",
@@ -762,7 +762,7 @@ export const SIM_MAP = {
   },
   "graph-db": {
     "lab": "none",
-    "figure": "comparison",
+    "figure": "none",
     "priority": "hld",
     "category": "hld-data",
     "track": "hld",
@@ -770,7 +770,7 @@ export const SIM_MAP = {
   },
   "vector-db-ann": {
     "lab": "none",
-    "figure": "comparison",
+    "figure": "none",
     "priority": "hld",
     "category": "hld-data",
     "track": "hld",
@@ -778,7 +778,7 @@ export const SIM_MAP = {
   },
   "key-value-stores": {
     "lab": "none",
-    "figure": "comparison",
+    "figure": "none",
     "priority": "hld",
     "category": "hld-data",
     "track": "hld",
@@ -786,7 +786,7 @@ export const SIM_MAP = {
   },
   "materialized-views": {
     "lab": "none",
-    "figure": "comparison",
+    "figure": "none",
     "priority": "hld",
     "category": "hld-data",
     "track": "hld",
@@ -794,7 +794,7 @@ export const SIM_MAP = {
   },
   "stream-table-duality": {
     "lab": "none",
-    "figure": "comparison",
+    "figure": "none",
     "priority": "hld",
     "category": "hld-data",
     "track": "hld",
@@ -1418,7 +1418,7 @@ export const SIM_MAP = {
   },
   "quorum": {
     "lab": "clickFlow",
-    "figure": "none",
+    "figure": "quorum",
     "priority": "hld",
     "category": "hld-consistency",
     "track": "hld",
@@ -1490,7 +1490,7 @@ export const SIM_MAP = {
   },
   "consistent-hashing": {
     "lab": "algorithm",
-    "figure": "none",
+    "figure": "hashRing",
     "priority": "hld",
     "category": "hld-db-scaling",
     "track": "hld",
@@ -2063,6 +2063,14 @@ export const SIM_MAP = {
     "category": "lld-dist-patterns",
     "track": "lld",
     "title": "Transactional Outbox"
+  },
+  "db-cache-dual-write": {
+    "lab": "clickFlow",
+    "figure": "none",
+    "priority": "lld",
+    "category": "lld-dist-patterns",
+    "track": "lld",
+    "title": "DB + Cache Dual Write"
   },
   "inbox-pattern": {
     "lab": "clickFlow",
