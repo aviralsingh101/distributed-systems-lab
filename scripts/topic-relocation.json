@@ -1,0 +1,923 @@
+{
+  "version": 1,
+  "description": "Phase 0 relocation — 114 backend topics → failures | hld | lld",
+  "counts": {
+    "failures": 42,
+    "hld": 46,
+    "lld": 26
+  },
+  "topics": {
+    "lost-update": {
+      "track": "failures",
+      "category": "concurrency",
+      "oldCategory": "concurrency",
+      "oldPath": "js/topics/concurrency/lost-update.js",
+      "newPath": "js/topics/failures/concurrency/lost-update.js",
+      "module": "./topics/failures/concurrency/lost-update.js"
+    },
+    "toctou": {
+      "track": "failures",
+      "category": "concurrency",
+      "oldCategory": "concurrency",
+      "oldPath": "js/topics/concurrency/toctou.js",
+      "newPath": "js/topics/failures/concurrency/toctou.js",
+      "module": "./topics/failures/concurrency/toctou.js"
+    },
+    "aba": {
+      "track": "failures",
+      "category": "concurrency",
+      "oldCategory": "concurrency",
+      "oldPath": "js/topics/concurrency/aba.js",
+      "newPath": "js/topics/failures/concurrency/aba.js",
+      "module": "./topics/failures/concurrency/aba.js"
+    },
+    "double-spend": {
+      "track": "failures",
+      "category": "concurrency",
+      "oldCategory": "concurrency",
+      "oldPath": "js/topics/concurrency/double-spend.js",
+      "newPath": "js/topics/failures/concurrency/double-spend.js",
+      "module": "./topics/failures/concurrency/double-spend.js"
+    },
+    "write-skew": {
+      "track": "failures",
+      "category": "concurrency",
+      "oldCategory": "concurrency",
+      "oldPath": "js/topics/concurrency/write-skew.js",
+      "newPath": "js/topics/failures/concurrency/write-skew.js",
+      "module": "./topics/failures/concurrency/write-skew.js"
+    },
+    "phantom-read": {
+      "track": "failures",
+      "category": "concurrency",
+      "oldCategory": "concurrency",
+      "oldPath": "js/topics/concurrency/phantom-read.js",
+      "newPath": "js/topics/failures/concurrency/phantom-read.js",
+      "module": "./topics/failures/concurrency/phantom-read.js"
+    },
+    "dirty-read": {
+      "track": "failures",
+      "category": "concurrency",
+      "oldCategory": "concurrency",
+      "oldPath": "js/topics/concurrency/dirty-read.js",
+      "newPath": "js/topics/failures/concurrency/dirty-read.js",
+      "module": "./topics/failures/concurrency/dirty-read.js"
+    },
+    "non-repeatable-read": {
+      "track": "failures",
+      "category": "concurrency",
+      "oldCategory": "concurrency",
+      "oldPath": "js/topics/concurrency/non-repeatable-read.js",
+      "newPath": "js/topics/failures/concurrency/non-repeatable-read.js",
+      "module": "./topics/failures/concurrency/non-repeatable-read.js"
+    },
+    "read-skew": {
+      "track": "failures",
+      "category": "concurrency",
+      "oldCategory": "concurrency",
+      "oldPath": "js/topics/concurrency/read-skew.js",
+      "newPath": "js/topics/failures/concurrency/read-skew.js",
+      "module": "./topics/failures/concurrency/read-skew.js"
+    },
+    "deadlock": {
+      "track": "failures",
+      "category": "locking",
+      "oldCategory": "locking",
+      "oldPath": "js/topics/locking/deadlock.js",
+      "newPath": "js/topics/failures/locking/deadlock.js",
+      "module": "./topics/failures/locking/deadlock.js"
+    },
+    "lock-contention": {
+      "track": "failures",
+      "category": "locking",
+      "oldCategory": "locking",
+      "oldPath": "js/topics/locking/lock-contention.js",
+      "newPath": "js/topics/failures/locking/lock-contention.js",
+      "module": "./topics/failures/locking/lock-contention.js"
+    },
+    "lock-convoy": {
+      "track": "failures",
+      "category": "locking",
+      "oldCategory": "locking",
+      "oldPath": "js/topics/locking/lock-convoy.js",
+      "newPath": "js/topics/failures/locking/lock-convoy.js",
+      "module": "./topics/failures/locking/lock-convoy.js"
+    },
+    "priority-inversion": {
+      "track": "failures",
+      "category": "locking",
+      "oldCategory": "locking",
+      "oldPath": "js/topics/locking/priority-inversion.js",
+      "newPath": "js/topics/failures/locking/priority-inversion.js",
+      "module": "./topics/failures/locking/priority-inversion.js"
+    },
+    "livelock": {
+      "track": "failures",
+      "category": "locking",
+      "oldCategory": "locking",
+      "oldPath": "js/topics/locking/livelock.js",
+      "newPath": "js/topics/failures/locking/livelock.js",
+      "module": "./topics/failures/locking/livelock.js"
+    },
+    "starvation": {
+      "track": "failures",
+      "category": "locking",
+      "oldCategory": "locking",
+      "oldPath": "js/topics/locking/starvation.js",
+      "newPath": "js/topics/failures/locking/starvation.js",
+      "module": "./topics/failures/locking/starvation.js"
+    },
+    "optimistic": {
+      "track": "lld",
+      "category": "lld-concurrency-strategies",
+      "oldCategory": "opt-pess",
+      "oldPath": "js/topics/opt-pess/optimistic.js",
+      "newPath": "js/topics/lld/lld-concurrency-strategies/optimistic.js",
+      "module": "./topics/lld/lld-concurrency-strategies/optimistic.js"
+    },
+    "pessimistic": {
+      "track": "lld",
+      "category": "lld-concurrency-strategies",
+      "oldCategory": "opt-pess",
+      "oldPath": "js/topics/opt-pess/pessimistic.js",
+      "newPath": "js/topics/lld/lld-concurrency-strategies/pessimistic.js",
+      "module": "./topics/lld/lld-concurrency-strategies/pessimistic.js"
+    },
+    "hybrid": {
+      "track": "lld",
+      "category": "lld-concurrency-strategies",
+      "oldCategory": "opt-pess",
+      "oldPath": "js/topics/opt-pess/hybrid.js",
+      "newPath": "js/topics/lld/lld-concurrency-strategies/hybrid.js",
+      "module": "./topics/lld/lld-concurrency-strategies/hybrid.js"
+    },
+    "redis-lock": {
+      "track": "lld",
+      "category": "lld-dist-locks",
+      "oldCategory": "dist-lock",
+      "oldPath": "js/topics/dist-lock/redis-lock.js",
+      "newPath": "js/topics/lld/lld-dist-locks/redis-lock.js",
+      "module": "./topics/lld/lld-dist-locks/redis-lock.js"
+    },
+    "redlock": {
+      "track": "lld",
+      "category": "lld-dist-locks",
+      "oldCategory": "dist-lock",
+      "oldPath": "js/topics/dist-lock/redlock.js",
+      "newPath": "js/topics/lld/lld-dist-locks/redlock.js",
+      "module": "./topics/lld/lld-dist-locks/redlock.js"
+    },
+    "zookeeper-lock": {
+      "track": "lld",
+      "category": "lld-dist-locks",
+      "oldCategory": "dist-lock",
+      "oldPath": "js/topics/dist-lock/zookeeper-lock.js",
+      "newPath": "js/topics/lld/lld-dist-locks/zookeeper-lock.js",
+      "module": "./topics/lld/lld-dist-locks/zookeeper-lock.js"
+    },
+    "etcd-lease": {
+      "track": "lld",
+      "category": "lld-dist-locks",
+      "oldCategory": "dist-lock",
+      "oldPath": "js/topics/dist-lock/etcd-lease.js",
+      "newPath": "js/topics/lld/lld-dist-locks/etcd-lease.js",
+      "module": "./topics/lld/lld-dist-locks/etcd-lease.js"
+    },
+    "lease-expiration": {
+      "track": "lld",
+      "category": "lld-dist-locks",
+      "oldCategory": "dist-lock",
+      "oldPath": "js/topics/dist-lock/lease-expiration.js",
+      "newPath": "js/topics/lld/lld-dist-locks/lease-expiration.js",
+      "module": "./topics/lld/lld-dist-locks/lease-expiration.js"
+    },
+    "fencing-tokens": {
+      "track": "lld",
+      "category": "lld-dist-locks",
+      "oldCategory": "dist-lock",
+      "oldPath": "js/topics/dist-lock/fencing-tokens.js",
+      "newPath": "js/topics/lld/lld-dist-locks/fencing-tokens.js",
+      "module": "./topics/lld/lld-dist-locks/fencing-tokens.js"
+    },
+    "acid": {
+      "track": "lld",
+      "category": "lld-transactions",
+      "oldCategory": "transactions",
+      "oldPath": "js/topics/transactions/acid.js",
+      "newPath": "js/topics/lld/lld-transactions/acid.js",
+      "module": "./topics/lld/lld-transactions/acid.js"
+    },
+    "isolation-levels": {
+      "track": "lld",
+      "category": "lld-transactions",
+      "oldCategory": "transactions",
+      "oldPath": "js/topics/transactions/isolation-levels.js",
+      "newPath": "js/topics/lld/lld-transactions/isolation-levels.js",
+      "module": "./topics/lld/lld-transactions/isolation-levels.js"
+    },
+    "two-pc": {
+      "track": "lld",
+      "category": "lld-transactions",
+      "oldCategory": "transactions",
+      "oldPath": "js/topics/transactions/two-pc.js",
+      "newPath": "js/topics/lld/lld-transactions/two-pc.js",
+      "module": "./topics/lld/lld-transactions/two-pc.js"
+    },
+    "three-pc": {
+      "track": "lld",
+      "category": "lld-transactions",
+      "oldCategory": "transactions",
+      "oldPath": "js/topics/transactions/three-pc.js",
+      "newPath": "js/topics/lld/lld-transactions/three-pc.js",
+      "module": "./topics/lld/lld-transactions/three-pc.js"
+    },
+    "saga": {
+      "track": "lld",
+      "category": "lld-transactions",
+      "oldCategory": "transactions",
+      "oldPath": "js/topics/transactions/saga.js",
+      "newPath": "js/topics/lld/lld-transactions/saga.js",
+      "module": "./topics/lld/lld-transactions/saga.js"
+    },
+    "tcc": {
+      "track": "lld",
+      "category": "lld-transactions",
+      "oldCategory": "transactions",
+      "oldPath": "js/topics/transactions/tcc.js",
+      "newPath": "js/topics/lld/lld-transactions/tcc.js",
+      "module": "./topics/lld/lld-transactions/tcc.js"
+    },
+    "state-transition": {
+      "track": "lld",
+      "category": "lld-transactions",
+      "oldCategory": "transactions",
+      "oldPath": "js/topics/transactions/state-transition.js",
+      "newPath": "js/topics/lld/lld-transactions/state-transition.js",
+      "module": "./topics/lld/lld-transactions/state-transition.js"
+    },
+    "out-of-order": {
+      "track": "lld",
+      "category": "lld-event-ordering",
+      "oldCategory": "ordering",
+      "oldPath": "js/topics/ordering/out-of-order.js",
+      "newPath": "js/topics/lld/lld-event-ordering/out-of-order.js",
+      "module": "./topics/lld/lld-event-ordering/out-of-order.js"
+    },
+    "duplicate-events": {
+      "track": "lld",
+      "category": "lld-event-ordering",
+      "oldCategory": "ordering",
+      "oldPath": "js/topics/ordering/duplicate-events.js",
+      "newPath": "js/topics/lld/lld-event-ordering/duplicate-events.js",
+      "module": "./topics/lld/lld-event-ordering/duplicate-events.js"
+    },
+    "missing-events": {
+      "track": "lld",
+      "category": "lld-event-ordering",
+      "oldCategory": "ordering",
+      "oldPath": "js/topics/ordering/missing-events.js",
+      "newPath": "js/topics/lld/lld-event-ordering/missing-events.js",
+      "module": "./topics/lld/lld-event-ordering/missing-events.js"
+    },
+    "event-reordering": {
+      "track": "lld",
+      "category": "lld-event-ordering",
+      "oldCategory": "ordering",
+      "oldPath": "js/topics/ordering/event-reordering.js",
+      "newPath": "js/topics/lld/lld-event-ordering/event-reordering.js",
+      "module": "./topics/lld/lld-event-ordering/event-reordering.js"
+    },
+    "clock-skew": {
+      "track": "lld",
+      "category": "lld-event-ordering",
+      "oldCategory": "ordering",
+      "oldPath": "js/topics/ordering/clock-skew.js",
+      "newPath": "js/topics/lld/lld-event-ordering/clock-skew.js",
+      "module": "./topics/lld/lld-event-ordering/clock-skew.js"
+    },
+    "lamport-clock": {
+      "track": "lld",
+      "category": "lld-event-ordering",
+      "oldCategory": "ordering",
+      "oldPath": "js/topics/ordering/lamport-clock.js",
+      "newPath": "js/topics/lld/lld-event-ordering/lamport-clock.js",
+      "module": "./topics/lld/lld-event-ordering/lamport-clock.js"
+    },
+    "vector-clock": {
+      "track": "lld",
+      "category": "lld-event-ordering",
+      "oldCategory": "ordering",
+      "oldPath": "js/topics/ordering/vector-clock.js",
+      "newPath": "js/topics/lld/lld-event-ordering/vector-clock.js",
+      "module": "./topics/lld/lld-event-ordering/vector-clock.js"
+    },
+    "retry-storm": {
+      "track": "failures",
+      "category": "retry",
+      "oldCategory": "retry",
+      "oldPath": "js/topics/retry/retry-storm.js",
+      "newPath": "js/topics/failures/retry/retry-storm.js",
+      "module": "./topics/failures/retry/retry-storm.js"
+    },
+    "thundering-herd": {
+      "track": "failures",
+      "category": "retry",
+      "oldCategory": "retry",
+      "oldPath": "js/topics/retry/thundering-herd.js",
+      "newPath": "js/topics/failures/retry/thundering-herd.js",
+      "module": "./topics/failures/retry/thundering-herd.js"
+    },
+    "cache-stampede": {
+      "track": "failures",
+      "category": "retry",
+      "oldCategory": "retry",
+      "oldPath": "js/topics/retry/cache-stampede.js",
+      "newPath": "js/topics/failures/retry/cache-stampede.js",
+      "module": "./topics/failures/retry/cache-stampede.js"
+    },
+    "dogpile": {
+      "track": "failures",
+      "category": "retry",
+      "oldCategory": "retry",
+      "oldPath": "js/topics/retry/dogpile.js",
+      "newPath": "js/topics/failures/retry/dogpile.js",
+      "module": "./topics/failures/retry/dogpile.js"
+    },
+    "exponential-backoff": {
+      "track": "hld",
+      "category": "hld-reliability-patterns",
+      "oldCategory": "retry",
+      "oldPath": "js/topics/retry/exponential-backoff.js",
+      "newPath": "js/topics/hld/hld-reliability-patterns/exponential-backoff.js",
+      "module": "./topics/hld/hld-reliability-patterns/exponential-backoff.js"
+    },
+    "retry-amplification": {
+      "track": "failures",
+      "category": "retry",
+      "oldCategory": "retry",
+      "oldPath": "js/topics/retry/retry-amplification.js",
+      "newPath": "js/topics/failures/retry/retry-amplification.js",
+      "module": "./topics/failures/retry/retry-amplification.js"
+    },
+    "coordinated-omission": {
+      "track": "failures",
+      "category": "retry",
+      "oldCategory": "retry",
+      "oldPath": "js/topics/retry/coordinated-omission.js",
+      "newPath": "js/topics/failures/retry/coordinated-omission.js",
+      "module": "./topics/failures/retry/coordinated-omission.js"
+    },
+    "idempotency-key": {
+      "track": "lld",
+      "category": "lld-idempotency",
+      "oldCategory": "idempotency",
+      "oldPath": "js/topics/idempotency/idempotency-key.js",
+      "newPath": "js/topics/lld/lld-idempotency/idempotency-key.js",
+      "module": "./topics/lld/lld-idempotency/idempotency-key.js"
+    },
+    "exactly-once": {
+      "track": "lld",
+      "category": "lld-idempotency",
+      "oldCategory": "idempotency",
+      "oldPath": "js/topics/idempotency/exactly-once.js",
+      "newPath": "js/topics/lld/lld-idempotency/exactly-once.js",
+      "module": "./topics/lld/lld-idempotency/exactly-once.js"
+    },
+    "deduplication": {
+      "track": "lld",
+      "category": "lld-idempotency",
+      "oldCategory": "idempotency",
+      "oldPath": "js/topics/idempotency/deduplication.js",
+      "newPath": "js/topics/lld/lld-idempotency/deduplication.js",
+      "module": "./topics/lld/lld-idempotency/deduplication.js"
+    },
+    "cache-invalidation": {
+      "track": "failures",
+      "category": "cache",
+      "oldCategory": "cache",
+      "oldPath": "js/topics/cache/cache-invalidation.js",
+      "newPath": "js/topics/failures/cache/cache-invalidation.js",
+      "module": "./topics/failures/cache/cache-invalidation.js"
+    },
+    "write-through": {
+      "track": "hld",
+      "category": "hld-cache-strategies",
+      "oldCategory": "cache",
+      "oldPath": "js/topics/cache/write-through.js",
+      "newPath": "js/topics/hld/hld-cache-strategies/write-through.js",
+      "module": "./topics/hld/hld-cache-strategies/write-through.js"
+    },
+    "write-around": {
+      "track": "hld",
+      "category": "hld-cache-strategies",
+      "oldCategory": "cache",
+      "oldPath": "js/topics/cache/write-around.js",
+      "newPath": "js/topics/hld/hld-cache-strategies/write-around.js",
+      "module": "./topics/hld/hld-cache-strategies/write-around.js"
+    },
+    "write-back": {
+      "track": "hld",
+      "category": "hld-cache-strategies",
+      "oldCategory": "cache",
+      "oldPath": "js/topics/cache/write-back.js",
+      "newPath": "js/topics/hld/hld-cache-strategies/write-back.js",
+      "module": "./topics/hld/hld-cache-strategies/write-back.js"
+    },
+    "read-through": {
+      "track": "hld",
+      "category": "hld-cache-strategies",
+      "oldCategory": "cache",
+      "oldPath": "js/topics/cache/read-through.js",
+      "newPath": "js/topics/hld/hld-cache-strategies/read-through.js",
+      "module": "./topics/hld/hld-cache-strategies/read-through.js"
+    },
+    "cache-aside": {
+      "track": "hld",
+      "category": "hld-cache-strategies",
+      "oldCategory": "cache",
+      "oldPath": "js/topics/cache/cache-aside.js",
+      "newPath": "js/topics/hld/hld-cache-strategies/cache-aside.js",
+      "module": "./topics/hld/hld-cache-strategies/cache-aside.js"
+    },
+    "cache-consistency": {
+      "track": "failures",
+      "category": "cache",
+      "oldCategory": "cache",
+      "oldPath": "js/topics/cache/cache-consistency.js",
+      "newPath": "js/topics/failures/cache/cache-consistency.js",
+      "module": "./topics/failures/cache/cache-consistency.js"
+    },
+    "negative-cache": {
+      "track": "hld",
+      "category": "hld-cache-strategies",
+      "oldCategory": "cache",
+      "oldPath": "js/topics/cache/negative-cache.js",
+      "newPath": "js/topics/hld/hld-cache-strategies/negative-cache.js",
+      "module": "./topics/hld/hld-cache-strategies/negative-cache.js"
+    },
+    "hot-key": {
+      "track": "failures",
+      "category": "cache",
+      "oldCategory": "cache",
+      "oldPath": "js/topics/cache/hot-key.js",
+      "newPath": "js/topics/failures/cache/hot-key.js",
+      "module": "./topics/failures/cache/hot-key.js"
+    },
+    "cache-pollution": {
+      "track": "failures",
+      "category": "cache",
+      "oldCategory": "cache",
+      "oldPath": "js/topics/cache/cache-pollution.js",
+      "newPath": "js/topics/failures/cache/cache-pollution.js",
+      "module": "./topics/failures/cache/cache-pollution.js"
+    },
+    "hot-partition": {
+      "track": "hld",
+      "category": "hld-db-scaling",
+      "oldCategory": "db-scaling",
+      "oldPath": "js/topics/db-scaling/hot-partition.js",
+      "newPath": "js/topics/hld/hld-db-scaling/hot-partition.js",
+      "module": "./topics/hld/hld-db-scaling/hot-partition.js"
+    },
+    "hot-row": {
+      "track": "hld",
+      "category": "hld-db-scaling",
+      "oldCategory": "db-scaling",
+      "oldPath": "js/topics/db-scaling/hot-row.js",
+      "newPath": "js/topics/hld/hld-db-scaling/hot-row.js",
+      "module": "./topics/hld/hld-db-scaling/hot-row.js"
+    },
+    "hot-index": {
+      "track": "hld",
+      "category": "hld-db-scaling",
+      "oldCategory": "db-scaling",
+      "oldPath": "js/topics/db-scaling/hot-index.js",
+      "newPath": "js/topics/hld/hld-db-scaling/hot-index.js",
+      "module": "./topics/hld/hld-db-scaling/hot-index.js"
+    },
+    "secondary-index-lag": {
+      "track": "hld",
+      "category": "hld-db-scaling",
+      "oldCategory": "db-scaling",
+      "oldPath": "js/topics/db-scaling/secondary-index-lag.js",
+      "newPath": "js/topics/hld/hld-db-scaling/secondary-index-lag.js",
+      "module": "./topics/hld/hld-db-scaling/secondary-index-lag.js"
+    },
+    "read-replica-lag": {
+      "track": "hld",
+      "category": "hld-db-scaling",
+      "oldCategory": "db-scaling",
+      "oldPath": "js/topics/db-scaling/read-replica-lag.js",
+      "newPath": "js/topics/hld/hld-db-scaling/read-replica-lag.js",
+      "module": "./topics/hld/hld-db-scaling/read-replica-lag.js"
+    },
+    "split-brain": {
+      "track": "hld",
+      "category": "hld-db-scaling",
+      "oldCategory": "db-scaling",
+      "oldPath": "js/topics/db-scaling/split-brain.js",
+      "newPath": "js/topics/hld/hld-db-scaling/split-brain.js",
+      "module": "./topics/hld/hld-db-scaling/split-brain.js"
+    },
+    "shard-rebalancing": {
+      "track": "hld",
+      "category": "hld-db-scaling",
+      "oldCategory": "db-scaling",
+      "oldPath": "js/topics/db-scaling/shard-rebalancing.js",
+      "newPath": "js/topics/hld/hld-db-scaling/shard-rebalancing.js",
+      "module": "./topics/hld/hld-db-scaling/shard-rebalancing.js"
+    },
+    "consistent-hashing": {
+      "track": "hld",
+      "category": "hld-db-scaling",
+      "oldCategory": "db-scaling",
+      "oldPath": "js/topics/db-scaling/consistent-hashing.js",
+      "newPath": "js/topics/hld/hld-db-scaling/consistent-hashing.js",
+      "module": "./topics/hld/hld-db-scaling/consistent-hashing.js"
+    },
+    "cross-shard-txn": {
+      "track": "hld",
+      "category": "hld-db-scaling",
+      "oldCategory": "db-scaling",
+      "oldPath": "js/topics/db-scaling/cross-shard-txn.js",
+      "newPath": "js/topics/hld/hld-db-scaling/cross-shard-txn.js",
+      "module": "./topics/hld/hld-db-scaling/cross-shard-txn.js"
+    },
+    "poison-message": {
+      "track": "failures",
+      "category": "messaging",
+      "oldCategory": "messaging",
+      "oldPath": "js/topics/messaging/poison-message.js",
+      "newPath": "js/topics/failures/messaging/poison-message.js",
+      "module": "./topics/failures/messaging/poison-message.js"
+    },
+    "dead-letter-queue": {
+      "track": "hld",
+      "category": "hld-messaging-ops",
+      "oldCategory": "messaging",
+      "oldPath": "js/topics/messaging/dead-letter-queue.js",
+      "newPath": "js/topics/hld/hld-messaging-ops/dead-letter-queue.js",
+      "module": "./topics/hld/hld-messaging-ops/dead-letter-queue.js"
+    },
+    "visibility-timeout": {
+      "track": "hld",
+      "category": "hld-messaging-ops",
+      "oldCategory": "messaging",
+      "oldPath": "js/topics/messaging/visibility-timeout.js",
+      "newPath": "js/topics/hld/hld-messaging-ops/visibility-timeout.js",
+      "module": "./topics/hld/hld-messaging-ops/visibility-timeout.js"
+    },
+    "consumer-rebalancing": {
+      "track": "hld",
+      "category": "hld-messaging-ops",
+      "oldCategory": "messaging",
+      "oldPath": "js/topics/messaging/consumer-rebalancing.js",
+      "newPath": "js/topics/hld/hld-messaging-ops/consumer-rebalancing.js",
+      "module": "./topics/hld/hld-messaging-ops/consumer-rebalancing.js"
+    },
+    "backpressure": {
+      "track": "failures",
+      "category": "messaging",
+      "oldCategory": "messaging",
+      "oldPath": "js/topics/messaging/backpressure.js",
+      "newPath": "js/topics/failures/messaging/backpressure.js",
+      "module": "./topics/failures/messaging/backpressure.js"
+    },
+    "slow-consumer": {
+      "track": "failures",
+      "category": "messaging",
+      "oldCategory": "messaging",
+      "oldPath": "js/topics/messaging/slow-consumer.js",
+      "newPath": "js/topics/failures/messaging/slow-consumer.js",
+      "module": "./topics/failures/messaging/slow-consumer.js"
+    },
+    "head-of-line-blocking": {
+      "track": "failures",
+      "category": "messaging",
+      "oldCategory": "messaging",
+      "oldPath": "js/topics/messaging/head-of-line-blocking.js",
+      "newPath": "js/topics/failures/messaging/head-of-line-blocking.js",
+      "module": "./topics/failures/messaging/head-of-line-blocking.js"
+    },
+    "partial-failure": {
+      "track": "failures",
+      "category": "failure",
+      "oldCategory": "failure",
+      "oldPath": "js/topics/failure/partial-failure.js",
+      "newPath": "js/topics/failures/failure/partial-failure.js",
+      "module": "./topics/failures/failure/partial-failure.js"
+    },
+    "cascading-failure": {
+      "track": "failures",
+      "category": "failure",
+      "oldCategory": "failure",
+      "oldPath": "js/topics/failure/cascading-failure.js",
+      "newPath": "js/topics/failures/failure/cascading-failure.js",
+      "module": "./topics/failures/failure/cascading-failure.js"
+    },
+    "bulkhead": {
+      "track": "failures",
+      "category": "failure",
+      "oldCategory": "failure",
+      "oldPath": "js/topics/failure/bulkhead.js",
+      "newPath": "js/topics/failures/failure/bulkhead.js",
+      "module": "./topics/failures/failure/bulkhead.js"
+    },
+    "circuit-breaker": {
+      "track": "failures",
+      "category": "failure",
+      "oldCategory": "failure",
+      "oldPath": "js/topics/failure/circuit-breaker.js",
+      "newPath": "js/topics/failures/failure/circuit-breaker.js",
+      "module": "./topics/failures/failure/circuit-breaker.js"
+    },
+    "fail-fast": {
+      "track": "failures",
+      "category": "failure",
+      "oldCategory": "failure",
+      "oldPath": "js/topics/failure/fail-fast.js",
+      "newPath": "js/topics/failures/failure/fail-fast.js",
+      "module": "./topics/failures/failure/fail-fast.js"
+    },
+    "graceful-degradation": {
+      "track": "failures",
+      "category": "failure",
+      "oldCategory": "failure",
+      "oldPath": "js/topics/failure/graceful-degradation.js",
+      "newPath": "js/topics/failures/failure/graceful-degradation.js",
+      "module": "./topics/failures/failure/graceful-degradation.js"
+    },
+    "brownout": {
+      "track": "failures",
+      "category": "failure",
+      "oldCategory": "failure",
+      "oldPath": "js/topics/failure/brownout.js",
+      "newPath": "js/topics/failures/failure/brownout.js",
+      "module": "./topics/failures/failure/brownout.js"
+    },
+    "cap-theorem": {
+      "track": "hld",
+      "category": "hld-consistency",
+      "oldCategory": "consistency",
+      "oldPath": "js/topics/consistency/cap-theorem.js",
+      "newPath": "js/topics/hld/hld-consistency/cap-theorem.js",
+      "module": "./topics/hld/hld-consistency/cap-theorem.js"
+    },
+    "eventual-consistency": {
+      "track": "hld",
+      "category": "hld-consistency",
+      "oldCategory": "consistency",
+      "oldPath": "js/topics/consistency/eventual-consistency.js",
+      "newPath": "js/topics/hld/hld-consistency/eventual-consistency.js",
+      "module": "./topics/hld/hld-consistency/eventual-consistency.js"
+    },
+    "read-your-writes": {
+      "track": "hld",
+      "category": "hld-consistency",
+      "oldCategory": "consistency",
+      "oldPath": "js/topics/consistency/read-your-writes.js",
+      "newPath": "js/topics/hld/hld-consistency/read-your-writes.js",
+      "module": "./topics/hld/hld-consistency/read-your-writes.js"
+    },
+    "monotonic-reads": {
+      "track": "hld",
+      "category": "hld-consistency",
+      "oldCategory": "consistency",
+      "oldPath": "js/topics/consistency/monotonic-reads.js",
+      "newPath": "js/topics/hld/hld-consistency/monotonic-reads.js",
+      "module": "./topics/hld/hld-consistency/monotonic-reads.js"
+    },
+    "session-consistency": {
+      "track": "hld",
+      "category": "hld-consistency",
+      "oldCategory": "consistency",
+      "oldPath": "js/topics/consistency/session-consistency.js",
+      "newPath": "js/topics/hld/hld-consistency/session-consistency.js",
+      "module": "./topics/hld/hld-consistency/session-consistency.js"
+    },
+    "quorum": {
+      "track": "hld",
+      "category": "hld-consistency",
+      "oldCategory": "consistency",
+      "oldPath": "js/topics/consistency/quorum.js",
+      "newPath": "js/topics/hld/hld-consistency/quorum.js",
+      "module": "./topics/hld/hld-consistency/quorum.js"
+    },
+    "crdt": {
+      "track": "hld",
+      "category": "hld-consistency",
+      "oldCategory": "consistency",
+      "oldPath": "js/topics/consistency/crdt.js",
+      "newPath": "js/topics/hld/hld-consistency/crdt.js",
+      "module": "./topics/hld/hld-consistency/crdt.js"
+    },
+    "tail-latency": {
+      "track": "hld",
+      "category": "hld-performance",
+      "oldCategory": "performance",
+      "oldPath": "js/topics/performance/tail-latency.js",
+      "newPath": "js/topics/hld/hld-performance/tail-latency.js",
+      "module": "./topics/hld/hld-performance/tail-latency.js"
+    },
+    "queue-buildup": {
+      "track": "hld",
+      "category": "hld-performance",
+      "oldCategory": "performance",
+      "oldPath": "js/topics/performance/queue-buildup.js",
+      "newPath": "js/topics/hld/hld-performance/queue-buildup.js",
+      "module": "./topics/hld/hld-performance/queue-buildup.js"
+    },
+    "littles-law": {
+      "track": "hld",
+      "category": "hld-performance",
+      "oldCategory": "performance",
+      "oldPath": "js/topics/performance/littles-law.js",
+      "newPath": "js/topics/hld/hld-performance/littles-law.js",
+      "module": "./topics/hld/hld-performance/littles-law.js"
+    },
+    "coordinated-omission-perf": {
+      "track": "hld",
+      "category": "hld-performance",
+      "oldCategory": "performance",
+      "oldPath": "js/topics/performance/coordinated-omission-perf.js",
+      "newPath": "js/topics/hld/hld-performance/coordinated-omission-perf.js",
+      "module": "./topics/hld/hld-performance/coordinated-omission-perf.js"
+    },
+    "false-sharing": {
+      "track": "hld",
+      "category": "hld-performance",
+      "oldCategory": "performance",
+      "oldPath": "js/topics/performance/false-sharing.js",
+      "newPath": "js/topics/hld/hld-performance/false-sharing.js",
+      "module": "./topics/hld/hld-performance/false-sharing.js"
+    },
+    "numa": {
+      "track": "hld",
+      "category": "hld-performance",
+      "oldCategory": "performance",
+      "oldPath": "js/topics/performance/numa.js",
+      "newPath": "js/topics/hld/hld-performance/numa.js",
+      "module": "./topics/hld/hld-performance/numa.js"
+    },
+    "context-switching": {
+      "track": "hld",
+      "category": "hld-performance",
+      "oldCategory": "performance",
+      "oldPath": "js/topics/performance/context-switching.js",
+      "newPath": "js/topics/hld/hld-performance/context-switching.js",
+      "module": "./topics/hld/hld-performance/context-switching.js"
+    },
+    "gc-pause": {
+      "track": "hld",
+      "category": "hld-performance",
+      "oldCategory": "performance",
+      "oldPath": "js/topics/performance/gc-pause.js",
+      "newPath": "js/topics/hld/hld-performance/gc-pause.js",
+      "module": "./topics/hld/hld-performance/gc-pause.js"
+    },
+    "hedged-requests": {
+      "track": "hld",
+      "category": "hld-rate-limiting",
+      "oldCategory": "prod-eng",
+      "oldPath": "js/topics/prod-eng/hedged-requests.js",
+      "newPath": "js/topics/hld/hld-rate-limiting/hedged-requests.js",
+      "module": "./topics/hld/hld-rate-limiting/hedged-requests.js"
+    },
+    "request-coalescing": {
+      "track": "hld",
+      "category": "hld-rate-limiting",
+      "oldCategory": "prod-eng",
+      "oldPath": "js/topics/prod-eng/request-coalescing.js",
+      "newPath": "js/topics/hld/hld-rate-limiting/request-coalescing.js",
+      "module": "./topics/hld/hld-rate-limiting/request-coalescing.js"
+    },
+    "token-bucket": {
+      "track": "hld",
+      "category": "hld-rate-limiting",
+      "oldCategory": "prod-eng",
+      "oldPath": "js/topics/prod-eng/token-bucket.js",
+      "newPath": "js/topics/hld/hld-rate-limiting/token-bucket.js",
+      "module": "./topics/hld/hld-rate-limiting/token-bucket.js"
+    },
+    "leaky-bucket": {
+      "track": "hld",
+      "category": "hld-rate-limiting",
+      "oldCategory": "prod-eng",
+      "oldPath": "js/topics/prod-eng/leaky-bucket.js",
+      "newPath": "js/topics/hld/hld-rate-limiting/leaky-bucket.js",
+      "module": "./topics/hld/hld-rate-limiting/leaky-bucket.js"
+    },
+    "adaptive-concurrency": {
+      "track": "hld",
+      "category": "hld-rate-limiting",
+      "oldCategory": "prod-eng",
+      "oldPath": "js/topics/prod-eng/adaptive-concurrency.js",
+      "newPath": "js/topics/hld/hld-rate-limiting/adaptive-concurrency.js",
+      "module": "./topics/hld/hld-rate-limiting/adaptive-concurrency.js"
+    },
+    "load-shedding": {
+      "track": "hld",
+      "category": "hld-rate-limiting",
+      "oldCategory": "prod-eng",
+      "oldPath": "js/topics/prod-eng/load-shedding.js",
+      "newPath": "js/topics/hld/hld-rate-limiting/load-shedding.js",
+      "module": "./topics/hld/hld-rate-limiting/load-shedding.js"
+    },
+    "admission-control": {
+      "track": "hld",
+      "category": "hld-rate-limiting",
+      "oldCategory": "prod-eng",
+      "oldPath": "js/topics/prod-eng/admission-control.js",
+      "newPath": "js/topics/hld/hld-rate-limiting/admission-control.js",
+      "module": "./topics/hld/hld-rate-limiting/admission-control.js"
+    },
+    "shuffle-sharding": {
+      "track": "hld",
+      "category": "hld-rate-limiting",
+      "oldCategory": "prod-eng",
+      "oldPath": "js/topics/prod-eng/shuffle-sharding.js",
+      "newPath": "js/topics/hld/hld-rate-limiting/shuffle-sharding.js",
+      "module": "./topics/hld/hld-rate-limiting/shuffle-sharding.js"
+    },
+    "cell-architecture": {
+      "track": "hld",
+      "category": "hld-rate-limiting",
+      "oldCategory": "prod-eng",
+      "oldPath": "js/topics/prod-eng/cell-architecture.js",
+      "newPath": "js/topics/hld/hld-rate-limiting/cell-architecture.js",
+      "module": "./topics/hld/hld-rate-limiting/cell-architecture.js"
+    },
+    "sticky-sessions": {
+      "track": "hld",
+      "category": "hld-rate-limiting",
+      "oldCategory": "prod-eng",
+      "oldPath": "js/topics/prod-eng/sticky-sessions.js",
+      "newPath": "js/topics/hld/hld-rate-limiting/sticky-sessions.js",
+      "module": "./topics/hld/hld-rate-limiting/sticky-sessions.js"
+    },
+    "connection-pool-exhaustion": {
+      "track": "failures",
+      "category": "prod-eng",
+      "oldCategory": "prod-eng",
+      "oldPath": "js/topics/prod-eng/connection-pool-exhaustion.js",
+      "newPath": "js/topics/failures/prod-eng/connection-pool-exhaustion.js",
+      "module": "./topics/failures/prod-eng/connection-pool-exhaustion.js"
+    },
+    "ephemeral-port-exhaustion": {
+      "track": "failures",
+      "category": "prod-eng",
+      "oldCategory": "prod-eng",
+      "oldPath": "js/topics/prod-eng/ephemeral-port-exhaustion.js",
+      "newPath": "js/topics/failures/prod-eng/ephemeral-port-exhaustion.js",
+      "module": "./topics/failures/prod-eng/ephemeral-port-exhaustion.js"
+    },
+    "n-plus-one": {
+      "track": "failures",
+      "category": "prod-eng",
+      "oldCategory": "prod-eng",
+      "oldPath": "js/topics/prod-eng/n-plus-one.js",
+      "newPath": "js/topics/failures/prod-eng/n-plus-one.js",
+      "module": "./topics/failures/prod-eng/n-plus-one.js"
+    },
+    "slow-query-amplification": {
+      "track": "failures",
+      "category": "prod-eng",
+      "oldCategory": "prod-eng",
+      "oldPath": "js/topics/prod-eng/slow-query-amplification.js",
+      "newPath": "js/topics/failures/prod-eng/slow-query-amplification.js",
+      "module": "./topics/failures/prod-eng/slow-query-amplification.js"
+    },
+    "noisy-neighbor": {
+      "track": "failures",
+      "category": "prod-eng",
+      "oldCategory": "prod-eng",
+      "oldPath": "js/topics/prod-eng/noisy-neighbor.js",
+      "newPath": "js/topics/failures/prod-eng/noisy-neighbor.js",
+      "module": "./topics/failures/prod-eng/noisy-neighbor.js"
+    },
+    "priority-queue-starvation": {
+      "track": "failures",
+      "category": "prod-eng",
+      "oldCategory": "prod-eng",
+      "oldPath": "js/topics/prod-eng/priority-queue-starvation.js",
+      "newPath": "js/topics/failures/prod-eng/priority-queue-starvation.js",
+      "module": "./topics/failures/prod-eng/priority-queue-starvation.js"
+    },
+    "watermarking": {
+      "track": "hld",
+      "category": "hld-rate-limiting",
+      "oldCategory": "prod-eng",
+      "oldPath": "js/topics/prod-eng/watermarking.js",
+      "newPath": "js/topics/hld/hld-rate-limiting/watermarking.js",
+      "module": "./topics/hld/hld-rate-limiting/watermarking.js"
+    },
+    "gossip-protocols": {
+      "track": "hld",
+      "category": "hld-rate-limiting",
+      "oldCategory": "prod-eng",
+      "oldPath": "js/topics/prod-eng/gossip-protocols.js",
+      "newPath": "js/topics/hld/hld-rate-limiting/gossip-protocols.js",
+      "module": "./topics/hld/hld-rate-limiting/gossip-protocols.js"
+    }
+  }
+}

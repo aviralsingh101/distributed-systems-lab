@@ -1,0 +1,357 @@
+import { writeFileSync } from "fs";
+
+const HIDDEN = new Set([
+  "pacelc", "merkle-anti-entropy", "cdc", "scatter-gather", "bff", "anti-corruption-layer",
+  "stream-table-duality", "hybrid-logical-clocks", "cell-architecture", "poison-pill-handling",
+  "finops", "platform-engineering-idp", "edge-compute", "local-first-crdt-apps",
+  "exactly-once-honesty", "phi-accrual-failure-detection", "multi-tenancy-patterns",
+  "inbox-pattern", "claim-check", "wire-tap", "content-enricher", "process-manager",
+  "cdc-relay", "event-carried-state-transfer", "temporal-tables", "scd-type-1-2",
+  "domain-vs-integration-events", "specification-pattern", "structured-concurrency",
+  "virtual-threads", "module-pattern", "outbox-inbox-combo", "event-notification-vs-ecst",
+  "anti-corruption-code-boundary", "event-storming-to-code", "mutation-testing",
+  "property-based-testing", "flyweight", "interpreter", "hateoas", "event-sourcing-projection",
+]);
+
+const ADVANCED = new Set([
+  "consensus-raft-paxos", "linearizability-vs-serializability", "distributed-transactions-comparison",
+  "event-sourcing", "cqrs", "chaos-engineering", "mutation-testing", "property-based-testing",
+  "visitor-pattern", "interpreter", "reactive-streams", "lock-free-atomic", "actor-model",
+]);
+
+function t(id, title, blurb, template, related) {
+  const topic = { id, title, blurb, template };
+  if (HIDDEN.has(id)) topic.tier = "hidden-gem";
+  else if (ADVANCED.has(id)) topic.tier = "advanced";
+  if (related?.length) topic.related = related;
+  return topic;
+}
+
+function cat(id, num, title, desc, topics) {
+  return { id, num, title, desc, topics };
+}
+
+const HLD_CATEGORIES = [
+  cat("hld-foundations", 1, "Foundations & Estimation", "Framework, requirements, and back-of-envelope math.", [
+    t("system-design-framework", "System Design Framework", "Structured approach from requirements to architecture.", "flow"),
+    t("requirements-gathering", "Requirements Gathering", "Functional vs non-functional needs before you draw boxes.", "flow"),
+    t("non-functional-requirements", "Non-Functional Requirements", "Latency, availability, scale, and cost constraints.", "tradeoff"),
+    t("back-of-envelope-estimation", "Back-of-Envelope Estimation", "Quick capacity math before deep design.", "flow"),
+    t("qps-latency-storage-math", "QPS / Latency / Storage Math", "Requests, bytes, and bandwidth sanity checks.", "flow"),
+    t("sla-vs-slo", "SLA vs SLO", "Customer promise vs internal reliability target.", "tradeoff"),
+    t("conways-law", "Conway's Law", "Org structure shapes system boundaries.", "topology"),
+    t("technical-debt-vs-velocity", "Technical Debt vs Velocity", "Ship fast now vs pay interest later.", "tradeoff"),
+  ]),
+  cat("hld-networking", 2, "Networking & Communication", "How services talk across the network.", [
+    t("dns", "DNS", "Name resolution and routing at the edge.", "topology"),
+    t("tcp-udp-tradeoffs", "TCP vs UDP", "Reliable streams vs fire-and-forget datagrams.", "tradeoff"),
+    t("http-evolution", "HTTP/1.1 → HTTP/2 → HTTP/3", "Multiplexing, headers, and QUIC gains.", "tradeoff"),
+    t("grpc", "gRPC", "Binary RPC with HTTP/2 and strong contracts.", "flow"),
+    t("websockets", "WebSockets", "Full-duplex persistent client connections.", "topology"),
+    t("sse", "Server-Sent Events", "Server push over one-way HTTP stream.", "flow"),
+    t("long-polling", "Long Polling", "Hold request open until data arrives.", "flow"),
+    t("webhooks", "Webhooks", "HTTP callbacks on external events.", "flow"),
+    t("rest-vs-graphql", "REST vs GraphQL", "Resource URLs vs client-shaped queries.", "tradeoff"),
+    t("tls-termination", "TLS Termination", "Where encryption ends: edge vs service.", "topology"),
+  ]),
+  cat("hld-blocks", 3, "Building Blocks", "Core infrastructure primitives at scale.", [
+    t("load-balancer-l4-l7", "Load Balancer (L4 / L7)", "Distribute traffic by IP or HTTP semantics.", "topology"),
+    t("reverse-proxy", "Reverse Proxy", "Front door that forwards to upstreams.", "topology"),
+    t("api-gateway", "API Gateway", "Edge routing, auth, and aggregation.", "topology"),
+    t("cdn", "CDN", "Cache static assets close to users.", "topology"),
+    t("caching-tiers", "Caching Tiers", "Browser, CDN, app, and DB cache layers.", "layer"),
+    t("sql-vs-nosql-selection", "SQL vs NoSQL Selection", "Pick storage by access pattern and consistency.", "tradeoff"),
+    t("partitioning-schemes", "Partitioning Schemes", "Shard by key, range, or hash.", "dataModel"),
+    t("replication-topologies", "Replication Topologies", "Primary-replica, multi-leader, leaderless.", "topology"),
+    t("message-queues", "Message Queues", "Decouple producers and consumers.", "topology"),
+    t("kafka-vs-rabbitmq", "Kafka vs RabbitMQ", "Log vs broker semantics for messaging.", "tradeoff"),
+    t("pub-sub-fanout", "Pub/Sub Fan-out", "One event, many subscribers.", "topology"),
+    t("edge-rate-limiting", "Edge Rate Limiting", "Protect services before overload hits.", "flow"),
+    t("service-discovery", "Service Discovery", "Find healthy instances dynamically.", "topology"),
+    t("service-mesh", "Service Mesh", "Sidecar-managed traffic and security.", "topology"),
+    t("blob-storage", "Blob Storage", "Durable objects for files and media.", "topology"),
+    t("edge-compute", "Edge Compute", "Run logic closer to users at the edge.", "topology"),
+  ]),
+  cat("hld-theory", 4, "Distributed Systems Theory", "Formal guarantees and coordination.", [
+    t("consensus-raft-paxos", "Consensus (Raft / Paxos)", "Agree on one value despite failures.", "stateMachine"),
+    t("linearizability-vs-serializability", "Linearizability vs Serializability", "Real-time order vs transaction order.", "tradeoff"),
+    t("quorum-reads-writes", "Quorum Reads / Writes", "R + W > N for tunable consistency.", "topology"),
+    t("cap-theorem", "CAP Theorem", "Under partition: consistency or availability.", "tradeoff"),
+    t("pacelc", "PACELC", "If no partition: latency vs consistency.", "tradeoff"),
+    t("hybrid-logical-clocks", "Hybrid Logical Clocks", "Physical time plus logical counters.", "flow"),
+    t("crdt-overview", "CRDT Overview", "Conflict-free replicated data types.", "dataModel"),
+    t("distributed-transactions-comparison", "Distributed Transactions", "2PC, saga, and outbox compared.", "tradeoff"),
+    t("exactly-once-honesty", "Exactly-Once Honesty", "End-to-end exactly-once is a myth.", "tradeoff"),
+    t("phi-accrual-failure-detection", "Phi Accrual Failure Detection", "Probabilistic suspect-node detection.", "stateMachine"),
+    t("consistent-hashing", "Consistent Hashing", "Minimal key movement when nodes change.", "topology"),
+    t("merkle-anti-entropy", "Merkle Anti-Entropy", "Tree hashes detect replica drift.", "topology"),
+  ]),
+  cat("hld-data", 5, "Data Systems", "Storage engines, analytics, and search.", [
+    t("btree-vs-lsm", "B-Tree vs LSM", "Read-optimized vs write-optimized storage.", "tradeoff"),
+    t("oltp-vs-olap", "OLTP vs OLAP", "Transactional rows vs analytic scans.", "tradeoff"),
+    t("warehouse-lake-lakehouse", "Warehouse vs Lake vs Lakehouse", "Structured BI vs raw files vs both.", "layer"),
+    t("lambda-vs-kappa", "Lambda vs Kappa", "Batch+stream dual path vs stream-only.", "pipeline"),
+    t("cdc", "Change Data Capture", "Stream DB changes to downstream systems.", "pipeline"),
+    t("search-inverted-index", "Search / Inverted Index", "Token lookup for full-text search.", "dataModel"),
+    t("time-series-db", "Time-Series DB", "Append-heavy metrics and events.", "dataModel"),
+    t("graph-db", "Graph DB", "Traverse relationships natively.", "dataModel"),
+    t("vector-db-ann", "Vector DB / ANN", "Similarity search for embeddings.", "dataModel"),
+    t("key-value-stores", "Key-Value Stores", "Simple get/put at massive scale.", "dataModel"),
+    t("materialized-views", "Materialized Views", "Precomputed query results.", "pipeline"),
+    t("stream-table-duality", "Stream-Table Duality", "Tables are streams; streams are tables.", "pipeline"),
+  ]),
+  cat("hld-architecture", 6, "Architecture Patterns", "Shapes for large systems.", [
+    t("monolith-vs-microservices", "Monolith vs Microservices", "One deployable vs many services.", "tradeoff"),
+    t("event-driven-architecture", "Event-Driven Architecture", "Loose coupling via async events.", "topology"),
+    t("cqrs", "CQRS", "Separate write and read models.", "layer"),
+    t("event-sourcing", "Event Sourcing", "State as append-only event log.", "pipeline"),
+    t("serverless-faas", "Serverless / FaaS", "Functions triggered by events.", "topology"),
+    t("bff", "Backend for Frontend", "Tailored API per client type.", "layer"),
+    t("strangler-fig", "Strangler Fig", "Gradually replace legacy system.", "flow"),
+    t("hexagonal-clean-architecture", "Hexagonal / Clean Architecture", "Domain core, ports, and adapters.", "layer"),
+    t("anti-corruption-layer", "Anti-Corruption Layer", "Translate foreign models at boundary.", "layer"),
+    t("multi-region-active-active", "Multi-Region Active-Active", "Serve from multiple regions live.", "topology"),
+    t("multi-tenancy-patterns", "Multi-Tenancy Patterns", "Silo, pool, and bridge isolation.", "topology"),
+    t("local-first-crdt-apps", "Local-First / CRDT Apps", "Offline-first with mergeable state.", "topology"),
+    t("cell-architecture", "Cell Architecture", "Isolated failure domains at scale.", "topology"),
+    t("scatter-gather", "Scatter-Gather", "Fan out queries, merge results.", "flow"),
+  ]),
+  cat("hld-reliability", 7, "Reliability & Operations", "Run systems safely in production.", [
+    t("observability-three-pillars", "Observability Pillars", "Metrics, logs, and distributed traces.", "layer"),
+    t("sli-slo-error-budgets", "SLI / SLO / Error Budgets", "Measure reliability and spend budget.", "flow"),
+    t("resilience-patterns-overview", "Resilience Patterns Overview", "Bulkhead, breaker, retry, and shed.", "topology"),
+    t("graceful-degradation-hld", "Graceful Degradation", "Drop features, keep core path alive.", "stateMachine"),
+    t("autoscaling-hpa", "Autoscaling / HPA", "Scale replicas by load signals.", "flow"),
+    t("deploy-strategies", "Deploy Strategies", "Blue-green, canary, and rolling.", "stateMachine"),
+    t("chaos-engineering", "Chaos Engineering", "Inject faults to find weaknesses.", "flow"),
+    t("incident-response", "Incident Response", "Detect, mitigate, and postmortem.", "flow"),
+    t("health-probes", "Health / Readiness / Liveness", "Kube probes gate traffic correctly.", "stateMachine"),
+    t("finops", "FinOps", "Cost visibility and optimization.", "tradeoff"),
+    t("platform-engineering-idp", "Platform Engineering / IDP", "Golden paths for product teams.", "layer"),
+    t("poison-pill-handling", "Poison Pill Handling", "Stop bad messages from blocking queues.", "flow"),
+  ]),
+  cat("hld-security", 8, "Security at Scale", "Identity, secrets, and perimeter.", [
+    t("authn-vs-authz", "AuthN vs AuthZ", "Who you are vs what you may do.", "layer"),
+    t("oauth2-oidc", "OAuth2 / OIDC", "Delegated auth and identity tokens.", "flow"),
+    t("jwt-pitfalls", "JWT Pitfalls", "Expiry, rotation, and token size traps.", "tradeoff"),
+    t("mtls-service-identity", "mTLS / Service Identity", "Mutual TLS between services.", "topology"),
+    t("secrets-management", "Secrets Management", "Vault, rotation, and least privilege.", "layer"),
+    t("ddos-mitigation", "DDoS Mitigation", "Absorb and scrub attack traffic.", "topology"),
+    t("waf", "WAF", "Filter malicious HTTP at the edge.", "topology"),
+    t("zero-trust-perimeter", "Zero-Trust Perimeter", "Never trust, always verify.", "layer"),
+  ]),
+  cat("hld-tradeoffs", 9, "Trade-off Decisions", "Side-by-side architecture choices.", [
+    t("strong-vs-eventual-consistency", "Strong vs Eventual Consistency", "Fresh reads vs availability under partition.", "tradeoff"),
+    t("acid-vs-base", "ACID vs BASE", "Transactional rigor vs eventual relax.", "tradeoff"),
+    t("sql-vs-nosql", "SQL vs NoSQL", "Schema, joins, and scale tradeoffs.", "tradeoff"),
+    t("latency-vs-throughput", "Latency vs Throughput", "Fast p99 vs max requests/sec.", "tradeoff"),
+    t("cache-strategies", "Cache Strategies", "Aside, through, around, and back.", "tradeoff"),
+    t("batch-vs-stream", "Batch vs Stream", "Periodic jobs vs continuous processing.", "tradeoff"),
+    t("lb-vs-proxy-vs-gateway", "LB vs Proxy vs Gateway", "Where each layer belongs.", "tradeoff"),
+    t("rest-vs-grpc-vs-graphql", "REST vs gRPC vs GraphQL", "Pick API style by client needs.", "tradeoff"),
+    t("polling-vs-websocket-family", "Polling vs WebSocket Family", "Pull, long poll, SSE, or socket.", "tradeoff"),
+    t("rate-limit-algorithms", "Rate-Limit Algorithms", "Token bucket, leaky bucket, sliding window.", "tradeoff"),
+    t("partitioning-schemes-tradeoff", "Partitioning Schemes", "Hash, range, or directory routing.", "tradeoff"),
+    t("replication-topologies-tradeoff", "Replication Topologies", "Sync vs async replica lag.", "tradeoff"),
+    t("two-pc-vs-saga-vs-tcc", "2PC vs Saga vs TCC", "Distributed commit patterns compared.", "tradeoff"),
+    t("push-vs-pull", "Push vs Pull", "Broker delivers vs consumer polls.", "tradeoff"),
+    t("lambda-vs-kappa-tradeoff", "Lambda vs Kappa", "Dual pipeline vs stream-only simplification.", "tradeoff"),
+    t("vertical-vs-horizontal-scale", "Vertical vs Horizontal Scale", "Bigger machine vs more nodes.", "tradeoff"),
+    t("normalization-vs-denormalization", "Normalization vs Denormalization", "Storage purity vs read speed.", "tradeoff"),
+    t("single-vs-multi-region", "Single vs Multi-Region", "Simplicity vs geo resilience.", "tradeoff"),
+    t("sync-vs-async-communication", "Sync vs Async Communication", "Request-response vs messaging.", "tradeoff"),
+    t("stateful-vs-stateless", "Stateful vs Stateless Services", "Session stickiness vs easy scale.", "tradeoff"),
+    t("pessimistic-vs-optimistic-concurrency", "Pessimistic vs Optimistic", "Lock early vs retry on conflict.", "tradeoff"),
+    t("managed-vs-self-hosted", "Managed vs Self-Hosted", "Ops burden vs control and cost.", "tradeoff"),
+  ]),
+  cat("hld-classics", 10, "Classic System Designs", "Interview and reference architectures.", [
+    t("url-shortener", "URL Shortener", "Hash, redirect, and analytics at scale.", "topology"),
+    t("rate-limiter-service", "Rate Limiter Service", "Distributed token bucket service.", "topology"),
+    t("news-feed", "News Feed", "Fan-out on write vs read.", "topology"),
+    t("notification-system", "Notification System", "Multi-channel delivery pipeline.", "pipeline"),
+    t("chat-system", "Chat System", "Real-time messaging at scale.", "topology"),
+    t("file-storage-s3", "File Storage (S3-like)", "Objects, metadata, and durability.", "topology"),
+    t("search-autocomplete", "Search Autocomplete", "Prefix trie and ranking.", "pipeline"),
+    t("distributed-cache-design", "Distributed Cache Design", "Consistent hash and eviction.", "topology"),
+    t("payment-system-hld", "Payment System (HLD)", "Meta design tying all tracks.", "topology"),
+    t("ride-sharing-dispatch", "Ride-Sharing Dispatch", "Match drivers and riders live.", "flow"),
+    t("ticket-booking", "Ticket Booking", "Inventory locks and oversell prevention.", "stateMachine"),
+    t("video-streaming", "Video Streaming", "Encode, CDN, and adaptive bitrate.", "pipeline"),
+    t("metrics-monitoring-system", "Metrics / Monitoring System", "Collect, store, and alert on metrics.", "pipeline"),
+    t("distributed-cron", "Distributed Cron", "Exactly-once scheduled jobs.", "topology"),
+    t("leaderboard", "Leaderboard", "Real-time ranked scores.", "dataModel"),
+    t("collaborative-editor", "Collaborative Editor", "OT/CRDT for shared documents.", "flow"),
+  ]),
+];
+
+const LLD_CATEGORIES = [
+  cat("lld-oop", 1, "OOP & Principles", "Object-oriented design fundamentals.", [
+    t("encapsulation", "Encapsulation", "Hide state; expose behavior.", "layer"),
+    t("abstraction", "Abstraction", "Model essentials, hide complexity.", "layer"),
+    t("inheritance-pitfalls", "Inheritance Pitfalls", "Fragile base class and deep trees.", "tradeoff"),
+    t("polymorphism", "Polymorphism", "One interface, many implementations.", "layer"),
+    t("composition-over-inheritance", "Composition over Inheritance", "Build behavior by combining objects.", "tradeoff"),
+    t("single-responsibility-principle", "Single Responsibility", "One reason to change per class.", "layer"),
+    t("open-closed-principle", "Open/Closed Principle", "Open for extension, closed for edit.", "layer"),
+    t("liskov-substitution-principle", "Liskov Substitution", "Subtypes must honor contracts.", "layer"),
+    t("interface-segregation-principle", "Interface Segregation", "Small focused interfaces.", "layer"),
+    t("dependency-inversion-principle", "Dependency Inversion", "Depend on abstractions, not concretes.", "layer"),
+    t("dry-principle", "DRY", "Don't repeat yourself.", "layer"),
+    t("kiss-yagni-principles", "KISS & YAGNI", "Simple design; build only what you need.", "layer"),
+  ]),
+  cat("lld-creational", 2, "Creational Patterns", "Object creation mechanisms.", [
+    t("singleton", "Singleton", "One instance, global access.", "stateMachine"),
+    t("factory-method", "Factory Method", "Subclass decides which type to create.", "flow"),
+    t("abstract-factory", "Abstract Factory", "Families of related products.", "layer"),
+    t("builder", "Builder", "Step-by-step complex object assembly.", "flow"),
+    t("prototype", "Prototype", "Clone instead of construct.", "flow"),
+    t("object-pool", "Object Pool", "Reuse expensive objects.", "topology"),
+    t("dependency-injection", "Dependency Injection", "Inject deps from outside.", "layer"),
+  ]),
+  cat("lld-structural", 3, "Structural Patterns", "Compose classes and objects.", [
+    t("adapter", "Adapter", "Make incompatible interfaces work.", "layer"),
+    t("bridge", "Bridge", "Decouple abstraction from impl.", "layer"),
+    t("composite", "Composite", "Tree of part-whole hierarchies.", "topology"),
+    t("decorator", "Decorator", "Add behavior without subclassing.", "layer"),
+    t("facade", "Facade", "Simple face on complex subsystem.", "layer"),
+    t("flyweight", "Flyweight", "Share intrinsic state across objects.", "topology"),
+    t("proxy", "Proxy", "Surrogate controlling access.", "layer"),
+    t("module-pattern", "Module Pattern", "Encapsulate private state in closure.", "layer"),
+  ]),
+  cat("lld-behavioral", 4, "Behavioral Patterns", "Algorithms and responsibility assignment.", [
+    t("strategy", "Strategy", "Swap algorithms at runtime.", "stateMachine"),
+    t("observer", "Observer", "Notify dependents on change.", "flow"),
+    t("command", "Command", "Encapsulate request as object.", "stateMachine"),
+    t("state", "State", "Behavior changes with internal state.", "stateMachine"),
+    t("template-method", "Template Method", "Skeleton algorithm, subclass steps.", "flow"),
+    t("iterator", "Iterator", "Traverse without exposing structure.", "flow"),
+    t("chain-of-responsibility", "Chain of Responsibility", "Pass request along handler chain.", "flow"),
+    t("mediator", "Mediator", "Central hub reduces mesh coupling.", "topology"),
+    t("memento", "Memento", "Capture and restore object state.", "stateMachine"),
+    t("visitor", "Visitor", "New ops without changing classes.", "flow"),
+    t("interpreter", "Interpreter", "Grammar as class hierarchy.", "stateMachine"),
+    t("specification-pattern", "Specification Pattern", "Composable business rule predicates.", "layer"),
+  ]),
+  cat("lld-dist-patterns", 5, "Distributed / Microservice Patterns", "Implementation patterns for services.", [
+    t("transactional-outbox", "Transactional Outbox", "Atomically write DB + outbox row.", "pipeline"),
+    t("inbox-pattern", "Inbox / Idempotent Consumer", "Dedup incoming messages safely.", "pipeline"),
+    t("cdc-relay", "CDC Relay", "Poll or stream outbox to broker.", "pipeline"),
+    t("sidecar", "Sidecar", "Helper container beside main app.", "topology"),
+    t("ambassador", "Ambassador", "Proxy outbound calls from app.", "topology"),
+    t("saga-choreography", "Saga Choreography", "Services react to events, no central.", "flow"),
+    t("saga-orchestration", "Saga Orchestration", "Central coordinator drives steps.", "stateMachine"),
+    t("cqrs-read-write-models", "CQRS Read/Write Models", "Separate schemas for commands vs queries.", "layer"),
+    t("event-sourcing-projection", "Event Sourcing Projection", "Build read model from event log.", "pipeline"),
+    t("claim-check", "Claim Check", "Store payload elsewhere; pass reference.", "flow"),
+    t("process-manager", "Process Manager", "Long-running workflow coordinator.", "stateMachine"),
+    t("wire-tap", "Wire Tap", "Tap message stream for audit/debug.", "pipeline"),
+    t("content-enricher", "Content Enricher", "Augment message with lookup data.", "pipeline"),
+    t("message-router", "Message Router", "Route by content or rules.", "flow"),
+    t("splitter-aggregator", "Splitter / Aggregator", "Split batch; merge correlated replies.", "flow"),
+    t("competing-consumers", "Competing Consumers", "Parallel workers on one queue.", "topology"),
+    t("priority-queue-consumer", "Priority Queue Consumer", "High-priority messages first.", "topology"),
+    t("strangler-code-level", "Strangler at Code Level", "Replace module behind facade.", "layer"),
+  ]),
+  cat("lld-async", 6, "Async & Messaging Patterns", "Asynchronous communication styles.", [
+    t("fire-and-forget", "Fire-and-Forget", "Send without waiting for reply.", "flow"),
+    t("request-reply", "Request-Reply", "Async call with correlation ID.", "flow"),
+    t("pub-sub-pattern", "Pub/Sub", "Publish to topic; many subscribe.", "topology"),
+    t("point-to-point", "Point-to-Point", "One producer, one consumer queue.", "topology"),
+    t("work-queue", "Work Queue", "Distribute tasks to workers.", "topology"),
+    t("delayed-scheduled-messages", "Delayed / Scheduled Messages", "Deliver at future time.", "stateMachine"),
+    t("dead-letter-pattern", "Dead Letter Pattern", "Park failed messages for review.", "flow", ["dead-letter-queue"]),
+    t("backpressure-pattern", "Backpressure Pattern", "Slow producer when consumer lags.", "flow", ["backpressure"]),
+    t("outbox-inbox-combo", "Outbox + Inbox Combo", "Reliable handoff between services.", "pipeline"),
+    t("event-notification-vs-ecst", "Event Notification vs ECST", "Light ping vs full state in event.", "tradeoff"),
+  ]),
+  cat("lld-api", 7, "API & Service Design", "Designing service boundaries and APIs.", [
+    t("rest-resource-modeling", "REST Resource Modeling", "Nouns, verbs, and status codes.", "dataModel"),
+    t("api-versioning-strategies", "API Versioning Strategies", "URL, header, or content negotiation.", "tradeoff"),
+    t("pagination-offset-cursor", "Pagination (Offset vs Cursor)", "Page through large result sets.", "tradeoff"),
+    t("error-contract-design", "Error Contract Design", "Stable error codes and bodies.", "layer"),
+    t("correlation-trace-ids", "Correlation / Trace IDs", "Follow one request end-to-end.", "flow"),
+    t("api-idempotency", "API Idempotency", "Safe retries on POST/charge.", "flow", ["idempotency-key"]),
+    t("contract-first-vs-code-first", "Contract-First vs Code-First", "Schema drives code or reverse.", "tradeoff"),
+    t("hateoas", "HATEOAS", "Hypermedia links in responses.", "flow"),
+    t("grpc-service-design", "gRPC Service Design", "Proto services, streams, and errors.", "layer"),
+    t("graphql-schema-design", "GraphQL Schema Design", "Types, resolvers, and N+1 traps.", "dataModel"),
+  ]),
+  cat("lld-db", 8, "Database Design", "Schema, indexing, and persistence.", [
+    t("er-modeling", "ER Modeling", "Entities, relationships, cardinality.", "dataModel"),
+    t("normal-forms-bcnf", "1NF–3NF / BCNF", "Reduce redundancy systematically.", "dataModel"),
+    t("denormalization-patterns", "Denormalization Patterns", "Duplicate data for read speed.", "tradeoff"),
+    t("primary-foreign-keys", "Primary / Foreign Keys", "Identity and referential integrity.", "dataModel"),
+    t("indexing-strategies", "Indexing Strategies", "B-tree, covering, and partial indexes.", "dataModel"),
+    t("soft-delete", "Soft Delete", "Flag deleted; keep history.", "dataModel"),
+    t("audit-tables", "Audit Tables", "Who changed what and when.", "dataModel"),
+    t("optimistic-locking-schema", "Optimistic Locking Schema", "Version column for CAS updates.", "dataModel"),
+    t("multi-tenant-schema", "Multi-Tenant Schema", "Shared DB, schema, or database.", "dataModel"),
+    t("temporal-tables", "Temporal Tables", "Valid-time row history in SQL.", "dataModel"),
+    t("scd-type-1-2", "SCD Type 1 / 2", "Overwrite vs track dimension history.", "dataModel"),
+    t("read-replica-routing", "Read Replica Routing", "Send reads to lag-tolerant replicas.", "topology"),
+    t("connection-pooling", "Connection Pooling", "Reuse DB connections efficiently.", "topology"),
+    t("transactional-boundaries", "Transactional Boundaries", "Where to start and commit units.", "layer"),
+  ]),
+  cat("lld-concurrency", 9, "Concurrency & Parallelism", "Threads, async, and parallel design.", [
+    t("threads-vs-async", "Threads vs Async", "OS threads vs event loop model.", "tradeoff"),
+    t("thread-pool", "Thread Pool", "Bounded workers for CPU/IO tasks.", "topology"),
+    t("producer-consumer", "Producer-Consumer", "Queue decouples rates.", "pipeline"),
+    t("readers-writers", "Readers-Writers", "Many readers or one writer.", "stateMachine"),
+    t("lock-free-atomic", "Lock-Free / Atomic", "CAS instead of mutex.", "stateMachine"),
+    t("actor-model", "Actor Model", "Isolated actors, message mailboxes.", "topology"),
+    t("reactive-streams", "Reactive Streams", "Backpressured async pipelines.", "pipeline"),
+    t("async-await-pitfalls", "Async/Await Pitfalls", "Deadlocks, context, and fire-and-forget.", "flow"),
+    t("virtual-threads", "Virtual Threads", "Lightweight threads on JVM.", "topology"),
+    t("structured-concurrency", "Structured Concurrency", "Scoped task lifetimes.", "layer"),
+  ]),
+  cat("lld-ddd", 10, "Clean Architecture & DDD", "Domain-driven design in code.", [
+    t("layered-architecture", "Layered Architecture", "Presentation, domain, persistence.", "layer"),
+    t("hexagonal-ports-adapters", "Hexagonal Ports & Adapters", "Domain core with plug-in edges.", "layer"),
+    t("bounded-context", "Bounded Context", "Explicit model boundary.", "topology"),
+    t("aggregate-root", "Aggregate Root", "Consistency boundary for writes.", "dataModel"),
+    t("domain-vs-integration-events", "Domain vs Integration Events", "Inside context vs cross-boundary.", "flow"),
+    t("repository-pattern", "Repository Pattern", "Collection-like persistence API.", "layer"),
+    t("value-objects", "Value Objects", "Immutable defined by attributes.", "dataModel"),
+    t("anti-corruption-code-boundary", "Anti-Corruption at Code", "Translate legacy API at adapter.", "layer"),
+    t("cqrs-handler-separation", "CQRS Handler Separation", "Command vs query handlers.", "layer"),
+    t("event-storming-to-code", "Event Storming to Code", "From sticky notes to aggregates.", "flow"),
+  ]),
+  cat("lld-testing", 11, "Testing & Quality", "Verify design through tests.", [
+    t("unit-integration-contract", "Unit vs Integration vs Contract", "Test pyramid layers.", "layer"),
+    t("test-doubles", "Test Doubles", "Mocks, stubs, fakes, and spies.", "layer"),
+    t("tdd-for-lld", "TDD for LLD", "Red-green-refactor drives design.", "flow"),
+    t("property-based-testing", "Property-Based Testing", "Generate inputs; assert invariants.", "flow"),
+    t("consumer-driven-contracts", "Consumer-Driven Contracts", "Pact-style API agreements.", "flow"),
+    t("mutation-testing", "Mutation Testing", "Kill mutants to measure tests.", "flow"),
+  ]),
+  cat("lld-classics", 12, "Classic LLD Problems", "Interview design walkthroughs.", [
+    t("parking-lot", "Parking Lot", "Spots, vehicles, and pricing.", "dataModel"),
+    t("elevator", "Elevator", "Scheduling and direction logic.", "stateMachine"),
+    t("lru-cache", "LRU Cache", "Hash map + doubly linked list.", "dataModel"),
+    t("in-memory-pub-sub", "In-Memory Pub-Sub", "Topics, subscribers, and delivery.", "topology"),
+    t("rate-limiter-in-process", "Rate Limiter (In-Process)", "Token bucket in one JVM/process.", "stateMachine"),
+  ]),
+];
+
+const hldCount = HLD_CATEGORIES.reduce((n, c) => n + c.topics.length, 0);
+const lldCount = LLD_CATEGORIES.reduce((n, c) => n + c.topics.length, 0);
+const hiddenCount = [...HLD_CATEGORIES, ...LLD_CATEGORIES]
+  .flatMap((c) => c.topics)
+  .filter((t) => t.tier === "hidden-gem").length;
+
+const out = `/**
+ * Topic manifest for HLD and LLD tracks.
+ * Generated from roadmap plan sections HLD-1..10 and LLD-1..12.
+ * HLD topics: ${hldCount} | LLD topics: ${lldCount} | Hidden gems: ${hiddenCount}
+ */
+
+export const HLD_CATEGORIES = ${JSON.stringify(HLD_CATEGORIES, null, 2)};
+
+export const LLD_CATEGORIES = ${JSON.stringify(LLD_CATEGORIES, null, 2)};
+
+export const HLD_TOPIC_COUNT = ${hldCount};
+export const LLD_TOPIC_COUNT = ${lldCount};
+`;
+
+writeFileSync(new URL("./topic-manifest.js", import.meta.url), out);
+console.log(`HLD: ${hldCount}, LLD: ${lldCount}, hidden-gem: ${hiddenCount}`);
