@@ -36,27 +36,17 @@ const topic = makeTopic({
     { id: "comparison", svg: `<svg viewBox="0 0 480 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Polling vs WebSocket Family comparison"> <rect x="40" y="35" width="160" height="50" rx="6" fill="#1a2236" stroke="#5b9dff" stroke-width="1.5"/> <text x="120" y="54" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Option A</text><text x="120" y="70" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pros / cons</text> <rect x="280" y="35" width="160" height="50" rx="6" fill="#1a2236" stroke="#7c5cff" stroke-width="1.5"/> <text x="360" y="54" text-anchor="middle" fill="#cdd6e8" font-size="11" font-family="system-ui">Option B</text><text x="360" y="70" text-anchor="middle" fill="#93a1bd" font-size="9" font-family="system-ui">pros / cons</text> <text x="240" y="105" text-anchor="middle" fill="#93a1bd" font-size="10" font-family="system-ui">vs</text> </svg>`, caption: `Polling vs WebSocket Family: tradeoff comparison — when to choose each approach.` },
   ],
   sections: [
-    { title: `The question`, body: `<p>When a client needs to learn about server-side changes — a payment moving from <code>PENDING</code> to <code>CAPTURED</code>, a new chat message, a live price — you must choose <em>how</em> the update reaches it. HTTP is request/response: the server cannot speak first. The four common options differ in latency, whether the channel is one-way or bidirectional, and how much they cost to operate at scale.</p>` },
-    { title: `Short polling`, figureAfter: "compare", body: `<p>The client re-requests on a fixed interval (<code>GET /payments/123</code> every few seconds). It is trivial to build, stateless, cache-friendly, and works through every proxy and firewall. The costs are real: worst-case latency equals the polling interval, and the vast majority of requests return "no change", wasting bandwidth, connections, and database reads. It is the right default only for infrequent updates or small client counts.</p>` },
-    { title: `Long polling`, body: `<p>The client sends a request and the server <b>holds it open</b> until there is data (or a timeout, typically 20–60s); the client then immediately reconnects. This gives near-real-time delivery over ordinary HTTP with no special protocol, so it traverses any proxy. The downsides: each waiting client ties up a request/connection, reconnection adds overhead and a small gap where events can be missed unless you track a cursor, and event ordering needs care. It is the historical fallback that libraries like Socket.IO degrade to.</p>` },
-    { title: `Server-Sent Events (SSE)`, body: `<p>SSE keeps a single HTTP response open and streams <code>text/event-stream</code> events from server to client. It is <b>one-way</b> (server → client); the client still sends actions via normal requests. SSE is simple and HTTP-native, and the browser <code>EventSource</code> API gives you <b>automatic reconnection</b> and resumption via the <code>Last-Event-ID</code> header — excellent for a live payment-status or notification feed. The catch: over HTTP/1.1 browsers cap connections at ~6 per domain, so many concurrent streams need HTTP/2 (which multiplexes them); older proxies may buffer the stream.</p>
-<pre>// Spring: push payment-status changes to the client as an SSE stream
-@GetMapping(path = "/payments/{id}/events",
-            produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-public SseEmitter stream(@PathVariable String id) {
-    SseEmitter emitter = new SseEmitter(0L);   // 0 = no server-side timeout
-    statusRegistry.subscribe(id, emitter);     // emitter.send(...) on each change
-    return emitter;
-}</pre>` },
-    { title: `WebSockets`, body: `<p>A WebSocket starts as an HTTP <code>Upgrade</code> handshake and then becomes a <b>full-duplex, persistent TCP connection</b>: both sides send frames at any time with minimal per-message overhead. This is the choice for genuinely bidirectional, low-latency workloads — trading, collaborative editing, live chat, multiplayer. The price is operational: the connection is <b>stateful</b>, so load balancers need sticky or connection-aware routing, horizontal scale needs a pub/sub backplane to fan messages across server instances, and you must build your own heartbeat, reconnect, and backpressure logic (the protocol gives you none).</p>` },
-    { title: `How to choose`, body: `<p>Pick the least powerful option that meets the need:</p>
-<ul>
-<li><b>Updates are rare / clients few</b> → short polling. Don't build infrastructure you won't use.</li>
-<li><b>Server→client push, one direction</b> (payment status, notifications, dashboards) → <b>SSE</b> over HTTP/2. Simple, resilient, auto-reconnecting.</li>
-<li><b>Frequent bidirectional, low latency</b> (chat, trading, presence) → <b>WebSocket</b>, and budget for the stateful-scaling work.</li>
-<li><b>Must survive hostile proxies with no WebSocket support</b> → long polling as a fallback tier.</li>
-</ul>
-<p>For a payment platform, order/charge status pages are a near-perfect SSE fit; a merchant support chat is where WebSockets earn their operational cost.</p>` },
+    { title: `The decision`, body: `<p>Pull, long poll, SSE, or socket.</p><p>Neither <b>Polling</b> nor <b>WebSocket Family</b> wins universally — constraints pick the winner. Open with the business constraint (scale, consistency, team, budget), not the technology name.</p>` },
+    { title: `Polling — when it wins`, body: `<p>Choose <b>Polling</b> when simplicity, strong guarantees, or team familiarity matter more than infinite horizontal scale. Good fit for early stage or strict correctness paths.</p>
+<p>List concrete strengths: operability, query flexibility, transaction support, or lower moving parts.</p>` },
+    { title: `WebSocket Family — when it wins`, body: `<p>Choose <b>WebSocket Family</b> when scale, partition tolerance, or specialized access patterns dominate. Accept higher operational and migration cost.</p>
+<p>List concrete strengths: partition tolerance, write throughput, schema flexibility, or geo distribution.</p>` },
+    { title: `Comparison`, body: `<p>Compare latency (p50/p99), consistency, operability, cost, and migration risk. Prototype under realistic load — paper tradeoffs hide tail latency and ops toil.</p>
+<p>Use a simple table in the interview: rows = criteria, columns = options, cells = short verdict.</p>`, figureAfter: "comparison" },
+    { title: `Decision guide for Polling vs WebSocket Family`, body: `<p>Start with the simpler option that meets SLOs. Escalate only when metrics prove pain: p99 breaches, unreconciled data, or ops blocking velocity.</p>
+<p>Document the decision in an ADR; revisit when traffic 10× or team doubles.</p>` },
+    { title: `Interview framing`, body: `<p>What interviewers probe for <b>Polling vs WebSocket Family</b>:</p><ul><li>Treating <b>Polling vs WebSocket Family</b> as a checkbox without explaining where it sits on the diagram.</li><li>Quoting buzzwords without tying them to latency, consistency, or cost constraints.</li><li>Ignoring failure modes — interviewers ask "what breaks first?"</li><li>Skipping capacity math before proposing shards or caches.</li><li>No clear data model or API contract for the component under discussion.</li><li>Saying "it depends" without decision criteria.</li><li>Not comparing operability and migration cost.</li></ul>
+<p><b>Strong answer pattern:</b> requirements → diagram → deep dive on hardest component → tradeoff → failure scenario → how you would load-test the design.</p>` }
   ],
   related: ["websockets", "sse", "long-polling", "http-evolution", "push-vs-pull"],
 });

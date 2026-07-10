@@ -5,7 +5,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Systems Lab — Backend, HLD &amp; LLD Learning</title>
   <meta name="description" content="Learn backend distributed systems, high-level design, and low-level design with interactive diagrams — one payment platform example throughout." />
-  <link rel="stylesheet" href="./styles/main.css" />
+  <script>
+    (function () {
+      var bust = sessionStorage.getItem("dsl_bust");
+      if (!bust) {
+        bust = String(Date.now());
+        sessionStorage.setItem("dsl_bust", bust);
+      }
+      window.__DSL_BUST__ = bust;
+      var link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = "./styles/main.css?v=" + encodeURIComponent(bust);
+      document.head.appendChild(link);
+    })();
+  </script>
 </head>
 <body>
   <div id="shell">
@@ -32,6 +45,9 @@
     </main>
   </div>
 
-  <script type="module" src="./js/app.js"></script>
+  <script type="module">
+    const bust = window.__DSL_BUST__ || String(Date.now());
+    import(`./js/app.js?v=${encodeURIComponent(bust)}`);
+  </script>
 </body>
 </html>

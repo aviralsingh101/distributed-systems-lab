@@ -1,22 +1,28 @@
 /**
  * Rubric-based content quality verification for @article-v2 topics.
- * Run: node scripts/verify-content-quality.mjs
+ * Run: node scripts/verify-content-quality.mjs [--track hld|lld|failures]
  */
 import { readFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { FLAT_TOPICS } from "../js/registry.js";
 import {
-  isArticleV2, validateArticleV2, hasForbidden, archetypeIssues, sectionWordCount,
+  isArticleV2, validateArticleV2, hasForbidden, sectionWordCount,
 } from "./lib/article-quality.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const trackFilter = process.argv.find((a) => a.startsWith("--track="))?.split("=")[1];
+const goldOnly = process.argv.includes("--gold-only");
 
 let v2Count = 0;
 const failures = [];
 const legacySkipped = [];
 
-for (const entry of FLAT_TOPICS) {
+const topics = trackFilter
+  ? FLAT_TOPICS.filter((t) => t.track === trackFilter)
+  : FLAT_TOPICS;
+
+for (const entry of topics) {
   const path = join(ROOT, "js", entry.module.replace(/^\.\//, ""));
   if (!existsSync(path)) {
     failures.push({ id: entry.id, track: entry.track, issues: ["missing file"] });
@@ -29,17 +35,13 @@ for (const entry of FLAT_TOPICS) {
     continue;
   }
 
+  if (goldOnly && !raw.includes("@hld-gold")) continue;
+
   v2Count++;
-  const issues = validateArticleV2(raw);
+  const issues = validateArticleV2(raw, entry.track, entry.category?.id || "");
   if (hasForbidden(raw)) issues.push("forbidden boilerplate");
 
-  const archetypeMatch = raw.match(/archetype:\s*["'](\w+)["']/);
-  const archetype = archetypeMatch?.[1] || "concept";
-  issues.push(...archetypeIssues(raw, archetype));
-
-  if (sectionWordCount(raw) < 280) issues.push("insufficient depth (< 280 words in sections)");
-
-  if (issues.length) failures.push({ id: entry.id, track: entry.track, issues });
+  if (issues.length) failures.push({ id: entry.id, track: entry.track, issues: [...new Set(issues)] });
 }
 
 console.log(`Quality rubric: ${v2Count} article-v2 topics checked, ${legacySkipped.length} legacy skipped`);

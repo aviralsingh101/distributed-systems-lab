@@ -49,8 +49,8 @@ function domainMechanics(title, catId, track) {
     chunks.push(`<p>Distributed transactions split into local ACID commits plus compensating actions. Outbox pattern atomically writes business row and event intent; saga orchestrator tracks forward steps and compensation handlers per failed step.</p>`);
   } else if (track === "lld" || catId.startsWith("lld")) {
     chunks.push(`<p>In Order Service code, <b>${title}</b> structures classes and boundaries so wallet debits, Gateway calls, and outbox inserts remain testable. Handlers stay thin; domain services own invariants; repositories hide SQL.</p>`);
-  } else if (track === "hld") {
-    chunks.push(`<p>In the payment platform topology, <b>${title}</b> sits on the request or data path between Client/Order and shared infrastructure (Gateway, Ledger, Queue). Draw it explicitly on architecture diagrams with failure domains marked.</p>`);
+  } else if (track === "hld" || catId.startsWith("hld")) {
+    chunks.push(`<p><b>${title}</b> is a building block in distributed system design — place it explicitly on architecture diagrams between clients, services, data stores, and async pipelines. Define its inputs, outputs, consistency expectations, and failure domain before sizing capacity.</p>`);
   } else {
     chunks.push(`<p><b>${title}</b> affects how concurrent payment requests interact with Wallet, Order Service, Gateway, and Ledger under production load — not just in single-threaded dev environments.</p>`);
   }
@@ -156,6 +156,64 @@ function patternSections(title, blurb, catId, track) {
   ];
 }
 
+function classicSections(title, blurb, catId) {
+  return [
+    {
+      title: "Functional requirements",
+      body: `<p>${blurb}</p>
+<p>Clarify scope before drawing boxes: core user flows, read vs write ratio, latency targets, consistency needs, and what is explicitly out of scope for v1. Interviewers deduct points when you jump to databases without requirements.</p>`,
+    },
+    {
+      title: "Capacity sketch",
+      body: `<p>Back-of-envelope: daily active users → peak QPS, average payload size, storage growth per day, and fan-out to downstream services. <b>${title}</b> design choices (caching, sharding, async) should trace back to these numbers.</p>`,
+    },
+    {
+      title: "High-level design",
+      body: `${domainMechanics(title, catId, "hld")}
+<p>Draw clients, API tier, data stores, caches, queues, and external dependencies. Mark sync vs async paths and which components are stateful. This is the diagram interviewers expect you to produce in 10–15 minutes.</p>`,
+    },
+    {
+      title: "Deep dives",
+      body: `<p>Pick 2–3 areas interviewers probe: data model, hot-path API design, partitioning strategy, caching, or consistency model. For <b>${title}</b>, explain the tradeoff behind each choice — not just the technology name.</p>`,
+    },
+    {
+      title: "Bottlenecks and scaling",
+      body: `<p>Identify the first three bottlenecks: single hot partition, DB write ceiling, fan-out to notification services, or storage cost. Describe horizontal scale path and what breaks if traffic 10× overnight.</p>`,
+    },
+    {
+      title: "Interview pitfalls",
+      body: `<p>Common mistakes in <b>${title}</b> interviews: skipping requirements, over-engineering microservices on day one, ignoring failure modes, or picking trendy tech without tying it to constraints. Practice narrating one scaling decision and one consistency tradeoff aloud.</p>`,
+    },
+  ];
+}
+
+function foundationSections(title, blurb) {
+  return [
+    {
+      title: "Framework overview",
+      body: `<p>${blurb}</p>
+<p>A repeatable system design process reduces panic in interviews and design reviews: clarify requirements → estimate capacity → propose high-level design → deep-dive critical paths → discuss tradeoffs and failure modes.</p>`,
+    },
+    {
+      title: "When to apply",
+      body: `<p>Use <b>${title}</b> at the start of any greenfield design or major redesign — before committing to databases or service boundaries. Skip heavy process for small refactors; use full framework for cross-team architecture decisions.</p>`,
+    },
+    {
+      title: "Example walkthrough",
+      body: `<p>Walk through a concrete system (URL shortener, feed, or payment flow): state assumptions aloud, draw boxes left-to-right (client → edge → services → data), then drill into the highest-risk component. Interviewers reward structured thinking over memorized buzzwords.</p>`,
+    },
+    {
+      title: "Common mistakes",
+      body: `<ul>
+<li>Jumping to sharding before defining read/write ratio.</li>
+<li>Listing technologies without explaining why they fit constraints.</li>
+<li>Ignoring non-functional requirements (availability, latency, cost).</li>
+<li>Never discussing what happens when a dependency fails.</li>
+</ul>`,
+    },
+  ];
+}
+
 function tradeoffSections(title, blurb) {
   return [
     {
@@ -184,8 +242,8 @@ function tradeoffSections(title, blurb) {
 <p>Regardless of choice, instrument <b>${title}</b> with metrics, run game-days, and keep rollback documented before any migration.</p>`,
     },
     {
-      title: "Production checklist",
-      body: `<p>Before committing to either side of <b>${title}</b>: load-test peak checkout, measure reconciliation drift, document RTO/RPO, and ensure on-call runbooks cover the failure modes each option introduces.</p>`,
+      title: "Interview framing",
+      body: `<p>When asked about <b>${title}</b> in an interview, state the constraint first (consistency, latency, ops cost), compare both sides with a concrete example, then commit to a choice and list one downside you accept. Avoid "it depends" without criteria.</p>`,
     },
   ];
 }
@@ -197,22 +255,13 @@ export function buildSections(title, blurb, track, catId) {
     case "failure": sections = failureSections(title, blurb, catId); break;
     case "pattern": sections = patternSections(title, blurb, catId, track); break;
     case "tradeoff": sections = tradeoffSections(title, blurb); break;
-    default: sections = conceptSections(title, blurb, catId, track);
-  }
-  const total = sections.reduce((n, s) => n + wordCount(s.body), 0);
-  if (total < 450) {
-    sections.push({
-      title: "Production checklist",
-      body: `<p>Before shipping <b>${title}</b> changes to production:</p>
-<ul>
-<li>Add metrics and dashboards — error rate, p99 latency, and domain-specific counters (lag, depth, conflict rate).</li>
-<li>Write a runbook entry with rollback steps and on-call escalation path.</li>
-<li>Load-test with parallel requests on the same wallet or hot key — dev laptops hide races.</li>
-<li>Correlate logs with <code>payment_id</code>, <code>wallet_id</code>, and <code>trace_id</code> across Order → Gateway → Ledger.</li>
-<li>Link to related sidebar topics when planning architecture or incident postmortems.</li>
-</ul>
-<p>Interview tip: whiteboard the charge flow, mark where <b>${title}</b> applies, and describe one real failure mode and its fix with concrete SQL or config.</p>`,
-    });
+    case "classic": sections = classicSections(title, blurb, catId); break;
+    default:
+      if (track === "hld" && catId.startsWith("hld-foundations")) {
+        sections = foundationSections(title, blurb);
+      } else {
+        sections = conceptSections(title, blurb, catId, track);
+      }
   }
   return { archetype, sections };
 }

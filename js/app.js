@@ -3,6 +3,7 @@ import {
   TOPIC_COUNT, FAILURES_COUNT, HLD_COUNT, LLD_COUNT, hiddenGems,
 } from "./registry.js";
 import { Stage } from "./sim/engine.js";
+import { bustUrl } from "./cache-bust.js";
 
 const appEl = document.getElementById("app");
 const navEl = document.getElementById("nav");
@@ -307,7 +308,7 @@ async function renderTopic(id) {
 
   let mod;
   try {
-    mod = await import(entry.module);
+    mod = await import(bustUrl(entry.module));
   } catch (e) {
     console.error(e);
     appEl.innerHTML = `

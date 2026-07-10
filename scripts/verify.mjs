@@ -5,6 +5,7 @@
 import { readFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+import { spawnSync } from "child_process";
 import { FLAT_TOPICS, TOPIC_COUNT, FAILURES_COUNT, HLD_COUNT, LLD_COUNT } from "../js/registry.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -83,6 +84,21 @@ try {
   await import(simLayoutUrl);
 } catch (e) {
   console.error("SIM LAYOUT FAIL:", e.message);
+  process.exit(1);
+}
+
+try {
+  const qual = spawnSync(process.execPath, ["scripts/verify-content-quality.mjs", "--track=hld", "--gold-only"], {
+    cwd: ROOT,
+    encoding: "utf8",
+  });
+  if (qual.stdout) process.stdout.write(qual.stdout);
+  if (qual.status !== 0) {
+    if (qual.stderr) process.stderr.write(qual.stderr);
+    process.exit(1);
+  }
+} catch (e) {
+  console.error("CONTENT QUALITY FAIL:", e.message);
   process.exit(1);
 }
 

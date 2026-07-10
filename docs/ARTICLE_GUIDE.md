@@ -32,6 +32,40 @@ export const content = {
 
 **Production Failures** topics use `archetype: "failure"`. Concepts like DNS never get "The problem" / "The solution" headings.
 
+## HLD track — interview article standard
+
+HLD topics teach **how to design**, not how to operate production. Interviewers expect: problem framing, high-level architecture, flow diagram, design decisions with tradeoffs, and pitfalls — **not** a generic production checklist.
+
+### Required section order by archetype
+
+| Archetype | Sections (in order) |
+|-----------|---------------------|
+| **concept** (DNS, CDN, blocks) | What it is → How it works / request path → **HLD placement** → **Design decisions** → **Pitfalls & what interviewers probe** → optional brief ops note |
+| **classic** (URL shortener, chat) | Requirements → Capacity sketch → **High-level design** → Deep dives → Bottlenecks → **Interview pitfalls** |
+| **tradeoff** (SQL vs NoSQL) | The decision → Option A → Option B → Comparison (+ figure) → Decision guide → **Interview framing** |
+| **foundations** (system-design-framework) | Process / framework steps → When to apply → Example walkthrough → Common mistakes |
+
+### HLD flow diagram (required)
+
+Every HLD topic must include at least one **topic-specific** figure via `figures[]` and `figureAfter` on a section:
+
+- Ingress/blocks → `requestFlow`
+- Classics → `architecture`
+- Tradeoffs → `comparison`
+- Gold topics → handcrafted SVG (`// @figure-handcrafted`)
+
+### What HLD articles must NOT do
+
+- **No generic Production checklist** — the identical 5-bullet block (`payment_id`, `wallet_id`, runbook, load-test hot key) is forbidden on HLD topics
+- **No shallow template rewrites** — `node scripts/rewrite-hld-articles.mjs` bulk mode is disabled; use hand-authored `@hld-gold` articles
+- **No "Option A / Option B"** without naming the actual technologies (e.g. token bucket vs leaky bucket)
+- **No payment-platform topology boilerplate** on unrelated topics (`In the payment platform topology…`)
+- Pitfalls section is **last** and **short** — the article body must teach the design first
+
+Gold references for depth: `rate-limiter-service`, `url-shortener`, `rate-limit-algorithms`, `token-bucket`, `reverse-proxy`, `dns`.
+
+Run `node scripts/run-hld-deep-wave.mjs --category=hld-classics` to list topics still needing deep rewrites.
+
 ## Forbidden phrases (hard fail in verify)
 
 - `How to read this page`
@@ -39,6 +73,9 @@ export const content = {
 - `We use the payment cast throughout`
 - `When reviewing a design doc or PR, ask: where does`
 - `Implementation checklist: (1) define ownership`
+- `Correlate logs with payment_id` (generic HLD checklist)
+- `Before shipping` + `Production checklist` (generic HLD checklist)
+- `In the payment platform topology` (generic HLD boilerplate)
 - Generic nginx/Postgres/broker paragraphs on non-relevant topics
 
 ## Payment examples

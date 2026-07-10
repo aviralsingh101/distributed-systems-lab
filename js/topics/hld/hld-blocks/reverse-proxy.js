@@ -1,6 +1,7 @@
 // @article-v2
 // @sim-lab
 // @figure-handcrafted
+// @hld-gold
 import { makeTopic } from "../../shared/topicFactory.js";
 import { createTopicSim } from "../../../sim/lab/registry.js";
 

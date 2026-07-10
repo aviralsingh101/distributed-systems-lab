@@ -1,6 +1,7 @@
-// @article-v2
 // @sim-lab
 import { createTopicSim } from "../../../sim/lab/registry.js";
+// @article-v2
+// @hld-gold
 
 export const meta = { id: "cache-aside", title: "Cache Aside", category: "cache" };
 
