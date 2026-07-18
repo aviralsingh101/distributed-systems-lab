@@ -61,6 +61,18 @@ docker push $DOCKERHUB_USER/dsl-notes-api:latest
 
 ### Start the stack
 
+**Windows (PowerShell) — recommended:**
+
+```powershell
+.\docker-up.ps1
+.\docker-up.ps1 -NoBuild
+.\docker-up.ps1 -Pull
+```
+
+Do **not** use `bash ./docker-up.sh` from PowerShell: that starts **WSL**, which cannot talk to Docker Desktop unless WSL integration is enabled.
+
+**Git Bash / macOS / Linux / WSL (with Docker integration):**
+
 ```bash
 ./docker-up.sh              # build + start
 ./docker-up.sh --no-build   # start existing images

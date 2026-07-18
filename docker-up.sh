@@ -27,8 +27,18 @@ for arg in "$@"; do
   esac
 done
 
-if ! docker info >/dev/null 2>&1; then
-  echo "ERROR: Docker engine is not running. Start Docker Desktop and retry." >&2
+# On Windows, `bash` is often WSL — Docker Desktop may be up but unreachable here.
+DOCKER_INFO="$(docker info 2>&1)" || true
+if ! docker info >/dev/null 2>&1 \
+  || echo "$DOCKER_INFO" | grep -qiE 'could not be found in this WSL|error during connect|Cannot connect to the Docker daemon'; then
+  echo "ERROR: Docker engine is not reachable from this shell." >&2
+  echo "Start Docker Desktop and wait until it is Running." >&2
+  if grep -qi microsoft /proc/version 2>/dev/null; then
+    echo "" >&2
+    echo "You are in WSL. Either:" >&2
+    echo "  1) PowerShell (recommended):  .\\docker-up.ps1" >&2
+    echo "  2) Enable Docker Desktop → Settings → Resources → WSL integration" >&2
+  fi
   exit 1
 fi
 
