@@ -4,6 +4,9 @@ import {
 } from "./registry.js";
 import { Stage } from "./sim/engine.js";
 import { bustUrl } from "./cache-bust.js";
+import {
+  refreshNotesAvailability, getNotesCache, renderNotesHub, renderNoteEditor,
+} from "./notes/views.js";
 
 const appEl = document.getElementById("app");
 const navEl = document.getElementById("nav");
@@ -24,14 +27,71 @@ function trackTabs() {
     a.className = "track-tab" + (activeTrack === tr.id ? " active" : "");
     a.href = `#/track/${tr.id}`;
     a.dataset.track = tr.id;
-    a.innerHTML = `<span class="track-short">${tr.short}</span><span class="track-count">${tr.categories.reduce((n, c) => n + c.topics.length, 0)}</span>`;
+    const count =
+      tr.id === "notes"
+        ? getNotesCache().length
+        : tr.categories.reduce((n, c) => n + c.topics.length, 0);
+    a.innerHTML = `<span class="track-short">${tr.short}</span><span class="track-count">${count}</span>`;
     a.title = tr.title;
     tabs.appendChild(a);
   });
   return tabs;
 }
 
+async function buildNotesNav() {
+  activeTrack = "notes";
+  navEl.innerHTML = "";
+  navEl.appendChild(trackTabs());
+
+  const status = document.createElement("div");
+  status.className = "notes-nav-status";
+  status.textContent = "Loading notes…";
+  navEl.appendChild(status);
+
+  const { available, notes } = await refreshNotesAvailability();
+  // Rebuild tabs with updated count
+  navEl.innerHTML = "";
+  navEl.appendChild(trackTabs());
+
+  if (!available) {
+    const banner = document.createElement("div");
+    banner.className = "notes-nav-status err";
+    banner.textContent = "Notes API offline";
+    navEl.appendChild(banner);
+    return { available: false, notes: [] };
+  }
+
+  const wrap = document.createElement("div");
+  wrap.className = "cat open";
+  wrap.innerHTML = `<button class="cat-btn" type="button"><span class="twist">▼</span><span class="cat-num">N</span><span>My notes</span><span class="cat-count">${notes.length}</span></button>`;
+  const ul = document.createElement("ul");
+  ul.className = "topics";
+
+  const newLi = document.createElement("li");
+  newLi.innerHTML = `<a class="topic-link notes-new-link" href="#/notes/new">+ New note</a>`;
+  ul.appendChild(newLi);
+
+  notes.forEach((n) => {
+    const li = document.createElement("li");
+    const a = document.createElement("a");
+    a.className = "topic-link";
+    a.href = `#/notes/${n.id}`;
+    a.dataset.note = n.id;
+    a.textContent = n.title || "Untitled";
+    li.appendChild(a);
+    ul.appendChild(li);
+  });
+  wrap.appendChild(ul);
+  navEl.appendChild(wrap);
+  return { available: true, notes };
+}
+
 function buildNav(trackId = activeTrack) {
+  if (trackId === "notes") {
+    buildNotesNav();
+    return;
+  }
+
   activeTrack = trackId;
   navEl.innerHTML = "";
   navEl.appendChild(trackTabs());
@@ -113,7 +173,7 @@ function renderHome() {
     (c) => `<span class="cast-item"><span class="dot" style="color:${c.color}"></span>${c.label}</span>`
   ).join("");
 
-  const trackCards = TRACKS.map((tr) => {
+  const trackCards = TRACKS.filter((tr) => tr.id !== "notes").map((tr) => {
     const count = tr.categories.reduce((n, c) => n + c.topics.length, 0);
     const gems = hiddenGems(tr.id).length;
     return `
@@ -124,6 +184,14 @@ function renderHome() {
         <div class="track-meta"><b>${count}</b> topics · <b>${tr.categories.length}</b> categories${gems ? ` · <span class="gem-label">${gems} hidden gems</span>` : ""}</div>
       </a>`;
   }).join("");
+
+  const notesCard = `
+    <a class="track-card notes-track-card" href="#/track/notes">
+      <div class="track-badge">Notes</div>
+      <h3>Private Notes</h3>
+      <p>Your learning notes (local Docker Postgres). Not available on GitHub Pages.</p>
+      <div class="track-meta">Open Notes tab · requires <code>docker compose up</code></div>
+    </a>`;
 
   appEl.innerHTML = `
     <section class="hero">
@@ -136,7 +204,7 @@ function renderHome() {
       </div>
     </section>
 
-    <section class="track-grid">${trackCards}</section>
+    <section class="track-grid">${trackCards}${notesCard}</section>
 
     <section class="legend">
       <h3>The cast (used in every simulation)</h3>
@@ -148,11 +216,19 @@ function renderHome() {
 }
 
 /* -------------------------------------------------------------- track hub - */
-function renderTrack(trackId) {
+async function renderTrack(trackId) {
   teardown();
   highlightNav(null);
   const track = getTrack(trackId);
   if (!track) { renderHome(); return; }
+
+  if (trackId === "notes") {
+    await buildNotesNav();
+    renderNotesHub(appEl, crumbsEl);
+    appEl.scrollTop = 0;
+    return;
+  }
+
   buildNav(trackId);
   crumbsEl.innerHTML = `<a href="#/">Home</a> / <b>${track.title}</b>`;
 
@@ -372,15 +448,29 @@ ${simHtml}
 }
 
 /* ----------------------------------------------------------------- router -- */
-function route() {
+async function route() {
   const hash = location.hash || "#/";
   shellEl.classList.remove("nav-open");
 
-  let m = hash.match(/^#\/topic\/(.+)$/);
+  let m = hash.match(/^#\/notes\/(.+)$/);
+  if (m) {
+    teardown();
+    await buildNotesNav();
+    const id = decodeURIComponent(m[1]);
+    await renderNoteEditor(appEl, crumbsEl, id);
+    navEl.querySelectorAll(".topic-link").forEach((a) => a.classList.remove("active"));
+    const link = navEl.querySelector(`.topic-link[data-note="${CSS.escape(id)}"]`)
+      || (id === "new" ? navEl.querySelector(".notes-new-link") : null);
+    link?.classList.add("active");
+    appEl.scrollTop = 0;
+    return;
+  }
+
+  m = hash.match(/^#\/topic\/(.+)$/);
   if (m) { renderTopic(decodeURIComponent(m[1])); return; }
 
   m = hash.match(/^#\/track\/(\w+)$/);
-  if (m) { renderTrack(m[1]); return; }
+  if (m) { await renderTrack(m[1]); return; }
 
   renderHome();
 }

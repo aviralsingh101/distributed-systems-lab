@@ -1,0 +1,5 @@
+node_modules/
+notes-api/node_modules/
+.DS_Store
+*.log
+notes-pgdata.tgz

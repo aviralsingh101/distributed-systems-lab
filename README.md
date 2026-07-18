@@ -17,27 +17,98 @@ Every topic uses the same **payment platform** cast (Wallet, Order Service, Paym
 
 Gold-standard exemplars: **DNS** (concept), **reverse-proxy** (concept), **lost-update** (failure), **transactional-outbox** (pattern), **singleton** (pattern).
 
-No backend. No build step. Pure HTML/CSS/JS (ES modules).
+No backend on GitHub Pages. For **private Notes**, run the full stack with Docker Compose (nginx + notes API + Postgres). Pure HTML/CSS/JS (ES modules) — no React.
 
 ## Running it
 
-Serve over HTTP (not `file://`):
+### Option A — Docker Compose (recommended for Notes)
+
+```bash
+docker compose up -d --build
+```
+
+Open <http://127.0.0.1:8080>. Use the **Notes** tab to create/edit notes.
+
+- Notes persist in Docker volume `notes_pgdata` (survives `docker compose down` / restart).
+- Wipe notes: `docker compose down -v`
+- Postgres is not published to the host; only nginx port **8080** is exposed.
+
+### Option B — Static only (GitHub Pages / http-server)
 
 ```bash
 npx http-server . -p 8123 -c-1
 ```
 
-Open <http://localhost:8123>.
+Open <http://localhost:8123>. Learning tracks work; **Notes** shows “Notes unavailable” / “Cannot add notes” because there is no API.
+
+### Docker Hub (build + push)
+
+```bash
+# Git Bash / WSL / macOS / Linux
+chmod +x docker-push.sh docker-up.sh
+./docker-push.sh
+```
+
+Or manually:
+
+```bash
+docker login
+export DOCKERHUB_USER=aviralsingh101
+docker compose build
+docker push $DOCKERHUB_USER/dsl-web:latest
+docker push $DOCKERHUB_USER/dsl-notes-api:latest
+```
+
+### Start the stack
+
+```bash
+./docker-up.sh              # build + start
+./docker-up.sh --no-build   # start existing images
+./docker-up.sh --pull       # pull from Hub, then start
+```
+
+Pull-only on another machine (volume is local to that machine):
+
+```bash
+export DOCKERHUB_USER=aviralsingh101
+docker compose -f docker-compose.hub.yml pull
+docker compose -f docker-compose.hub.yml up -d
+```
+
+Postgres image stays official `postgres:16-alpine` (not pushed).
+
+### Backup notes volume
+
+```bash
+docker run --rm -v distributed-systems-lab_notes_pgdata:/var/lib/postgresql/data -v ${PWD}:/backup alpine tar czf /backup/notes-pgdata.tgz -C /var/lib/postgresql/data .
+```
+
+(Adjust volume name with `docker volume ls` if the project directory name differs.)
 
 ## Navigation
 
-- `#/` — Home with three track cards
+- `#/` — Home with track cards
 - `#/track/failures` — Production failures roadmap
 - `#/track/hld` — High-level design roadmap
 - `#/track/lld` — Low-level design roadmap
+- `#/track/notes` — Private notes hub (Docker stack only)
+- `#/notes/new` — Create note
+- `#/notes/<id>` — Edit note
 - `#/topic/<id>` — Individual concept page
 
-Sidebar has **track tabs** (Failures | HLD | LLD) and search across all topics. Topics marked **◆** are *hidden gems* — lesser-known concepts worth learning.
+Sidebar has **track tabs** (Failures | HLD | LLD | Notes) and search across learning topics. Topics marked **◆** are *hidden gems*.
+
+## Project structure
+
+```
+docker-compose.yml      # web + api + db (named volume notes_pgdata)
+docker-compose.hub.yml  # pull-only images from Docker Hub
+Dockerfile.web          # nginx + static site (serves .js/.mjs as application/javascript)
+Dockerfile.api          # Node notes API
+deploy/nginx.conf       # static + /api proxy
+notes-api/              # Express + Postgres schema
+js/notes/               # Notes UI (api, editor, views)
+```
 
 ## Content authoring
 

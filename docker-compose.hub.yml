@@ -1,0 +1,38 @@
+# Pull-only stack (no build). Use after images are on Docker Hub:
+#   export DOCKERHUB_USER=aviralsingh101
+#   docker compose -f docker-compose.hub.yml pull
+#   docker compose -f docker-compose.hub.yml up -d
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: notes
+      POSTGRES_PASSWORD: notes
+      POSTGRES_DB: notes
+    volumes:
+      - notes_pgdata:/var/lib/postgresql/data
+      - ./notes-api/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U notes -d notes"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    image: ${DOCKERHUB_USER:-aviralsingh101}/dsl-notes-api:latest
+    environment:
+      DATABASE_URL: postgres://notes:notes@db:5432/notes
+      PORT: "8787"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    image: ${DOCKERHUB_USER:-aviralsingh101}/dsl-web:latest
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+
+volumes:
+  notes_pgdata:

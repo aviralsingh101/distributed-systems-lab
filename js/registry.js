@@ -36,6 +36,13 @@ export const TRACKS = [
     desc: "OOP, design patterns, service/DB design, and async implementation patterns.",
     categories: LLD_CATEGORIES.map((c) => ({ ...c, track: "lld" })),
   },
+  {
+    id: "notes",
+    title: "Private Notes",
+    short: "Notes",
+    desc: "Personal learning notes stored in your local Docker Postgres — not on GitHub Pages.",
+    categories: [],
+  },
 ];
 
 /** @deprecated use TRACKS[0].categories */
@@ -43,7 +50,7 @@ export const CATEGORIES = TRACKS[0].categories;
 
 const _topicIndex = new Map();
 const _flat = [];
-const _byTrack = { failures: [], hld: [], lld: [] };
+const _byTrack = { failures: [], hld: [], lld: [], notes: [] };
 
 TRACKS.forEach((track) => {
   track.categories.forEach((cat) => {

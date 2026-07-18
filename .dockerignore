@@ -1,0 +1,10 @@
+.git
+.github
+**/node_modules
+**/.DS_Store
+agent-transcripts
+terminals
+*.md
+!README.md
+scripts
+docs/CONTENT_TEMPLATE.md
